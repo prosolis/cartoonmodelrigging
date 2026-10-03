@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://o5wfabbkdev7"]
+
+[ext_resource type="Script" uid="uid://bp65e7dhduoep" path="res://Characters_1_Godot/Test/animation_test.gd" id="1_test"]
+
+[node name="AnimationTest" type="Node3D"]
+script = ExtResource("1_test")

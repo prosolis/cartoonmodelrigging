@@ -1,0 +1,7 @@
+[gd_resource type="StandardMaterial3D" format=3 uid="uid://c10kengmxqmkl"]
+
+[ext_resource type="Texture2D" uid="uid://c80x53ljddmo7" path="res://Characters_1_Godot/Textures/city_atlas.png" id="1_albedo"]
+
+[resource]
+resource_name = "Hair"
+albedo_texture = ExtResource("1_albedo")

@@ -1,0 +1,78 @@
+# Cartoon model rigging
+
+`Characters_1_Godot/` is the Characters_1 pack for Godot 4 (308 characters sharing one
+21-bone skeleton). The original zip is kept as `Characters_1_Godot.zip`.
+
+This repo adds **31 new animations** to the pack's shared animation library, plus a few
+props that go with them. All 47 original animations are untouched.
+
+![New animations](Characters_1_Godot/Preview_NewAnimations.png)
+
+## New animations
+
+All of them are in `Characters_1_Godot/Animations/Characters_1_Animations.glb`, so they work on
+every character, the same way the original ones do. Names ending in `-loop` loop; Godot drops
+that suffix on import (`Wave_B-loop` shows up as `Wave_B`).
+
+| Group | Animations (Godot name) | Prop |
+|---|---|---|
+| Wave | `Wave_A` (raise, wave 3x, lower), `Wave_B` (loop) | |
+| Sit on a chair | `Sit_Chair_Down`, `Sit_Chair_Idle`, `Sit_Chair_Talk`, `Sit_Chair_StandUp` | your own chair |
+| Sit on the ground | `Sit_Floor_Down`, `Sit_Floor_Idle`, `Sit_Floor_StandUp` | |
+| Carry a box | `Carry_Box_Idle`, `Carry_Box_Walk` | `Props/Box.glb` on `Torso` |
+| Umbrella | `Umbrella_Idle`, `Umbrella_Walk` | `Props/Umbrella.glb` on `IteamSlot.R` |
+| Look up | `LookUp_A` (scanning the sky), `LookUp_B` (shading the eyes) | |
+| Phone | `Phone_Walk` (walking, looking down), `Phone_Idle` (texting), `Phone_Talk` (call at the ear) | `Props/Phone.glb` on `IteamSlot.R` |
+| Hot | `Fan_Hot` (fanning the face, hand on hip) | |
+| Cold | `Shiver_Cold` (hunched, shaking, rubbing hands) | |
+| Cycling | `Cycling` (pedalling), `Cycling_Coast` | `Props/Bicycle.glb` at the character root |
+| Extras | `Talk`, `Clap`, `Cheer`, `Point_A`, `Nod_Yes`, `Shake_No`, `Shrug`, `Dance_A`, `Wait_HandsBehind` | |
+
+The walking variants are built on the pack's `Walk_C` cycle (1.03 s, in place), so they line up
+with it.
+
+## Using the props in Godot
+
+Bone props have their offset baked into the file, so you attach them with an identity transform:
+
+```gdscript
+var att := BoneAttachment3D.new()
+att.bone_name = "IteamSlot.R"            # "Torso" for the box
+skeleton.add_child(att)                    # the character's Armature/Skeleton3D
+att.add_child(preload("res://Characters_1_Godot/Props/Umbrella.glb").instantiate())
+```
+
+The bicycle is a child of the character root (not a bone). Its own `AnimationPlayer` has
+`Pedal` (0.8 s, matches `Cycling`) and `Coast` (2 s, matches `Cycling_Coast`). Start it together
+with the rider so the cranks line up with the feet.
+
+`Test/AnimationTest.tscn` attaches all of this automatically: pick an animation and the matching
+prop appears.
+
+**Chair:** sitting moves the hips back about 0.17 from the character's root, and the seat surface
+is at a height of about 0.27. Put the character's root at the front edge of the chair, facing away
+from it.
+
+**Notes / limits**
+- The hands are mittens and the rig has no finger or face bones, so the poses are stylised.
+- Props sit at a placement that clears the heads of all characters (the umbrella shaft passes at
+  least 6 cm from every head; checked with `tools/check_clearance.py`). The phone at the ear is set
+  for a typical head width, so on the two widest heads (Character_3 and Character_4) it can
+  overlap the hair a little.
+
+## Regenerating / tweaking
+
+The animations are procedural Python (Blender's `bpy` module), so they can be tuned and rebuilt:
+
+```sh
+python3.11 -m venv .venv && .venv/bin/pip install bpy==4.2.* numpy pillow
+.venv/bin/python tools/build_animations.py              # rebuild all new animations + props
+.venv/bin/python tools/build_animations.py Wave_A       # rebuild just one
+.venv/bin/python tools/preview.py out/ Wave_A --props   # render a contact sheet to check it
+```
+
+- `tools/animations.py`: the animation definitions (poses as functions of time)
+- `tools/rigkit.py`: posing helpers (FK, two-bone IK, keyframe baking)
+- `tools/props.py`: prop geometry and export
+- `tools/merge_glb.py`: appends animations to the library without touching the originals
+- `tools/check_clearance.py`: umbrella-vs-head clearance check across characters

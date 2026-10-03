@@ -1,0 +1,5 @@
+# Godot editor cache
+.godot/
+__pycache__/
+*.pyc
+.venv/

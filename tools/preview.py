@@ -114,7 +114,10 @@ def main():
             fr = f0 + (f1 - f0) * (0.3 if name.endswith("-loop") else 0.5)
             sc.frame_set(int(fr))
             hips = char_arm.pose.bones["Hips"].head
-            place_camera(cam, views[0], char_arm.matrix_world @ Vector((hips.x, hips.y, 0.75)), args.dist)
+            yaw, dist = views[0], args.dist
+            if props_mod and "Taxi" in props_mod.ANIM_PROPS.get(name, []):
+                yaw, dist = 150.0, 6.0  # the taxi is in front of the character: look from behind
+            place_camera(cam, yaw, char_arm.matrix_world @ Vector((hips.x, hips.y, 0.75)), dist)
             path = os.path.join(args.out, "_tile.png")
             sc.render.filepath = path
             bpy.ops.render.render(write_still=True)

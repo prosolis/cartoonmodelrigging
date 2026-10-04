@@ -66,33 +66,33 @@ BIKE = {
     "wheel_r": 0.23,
 }
 
-# Taxi stand-in, placed relative to the character root of Taxi_Enter / Taxi_Exit
-# (armature space: +Z up, the character faces -Y). The car faces -X (the
-# character's right) with its right side toward the character; the rear door is
-# hinged at its front edge and swings open toward the character. It is a
-# cartoon car sized for these characters: scale your own taxi so its rear door,
-# sill and seat line up with these numbers.
+# Taxi for Taxi_Enter / Taxi_Exit: the PixelClock City Taxi_5 (pixelclock-city-taxis.zip),
+# fitted by tools/taxi.py and placed relative to the character root (armature
+# space: +Z up, the character faces -Y). The car faces -X (the character's
+# right) with its right side toward the character; its right rear door is cut
+# out and hinged at its front edge. These are the fitted car's measurements
+# (taxi.TAXI_SCALE = 1.25) that the animations are built around.
 TAXI = {
-    "side_y": -0.56,                # outer face of the right-hand doors
-    "width": 1.40,
-    "hinge": Vector((-1.17, -0.56, 0.0)),  # rear door hinge axis (vertical)
-    "door_w": 0.92,                 # door opening: x from hinge.x to hinge.x + door_w
-    "door_open": 75.0,              # degrees, fully open
-    "sill_z": 0.16,
-    "opening_top": 1.94,
-    "roof_z": 2.02,                 # underside of the roof (tall, like a London cab: fits every model)
-    "floor_z": 0.10,
-    "seat_z": 0.34,                 # rear seat cushion top
-    "seat_back_x": -0.12,           # front face of the rear backrest
-    "seat_front_x": -0.58,          # front edge of the rear cushion
-    "front_seat_x": -1.20,          # back face of the front seats
-    "front": -3.05, "rear": 0.80,   # bumper to bumper (x)
-    "wheel_r": 0.27, "wheels_x": (-2.45, 0.32),
+    "side_y": -0.5575,              # outer face of the right-hand side
+    "width": 1.825,
+    "hinge": Vector((-1.025, -0.5575, 0.0)),  # rear door hinge axis (vertical)
+    "door_w": 0.78,                 # door length at window height (0.625 beside the wheel arch)
+    "door_open": 85.0,              # degrees, fully open
+    "sill_z": 0.48,                 # top of the step below the door opening (= cabin floor)
+    "belt_z": 1.24,                 # bottom of the side windows
+    "opening_top": 2.225,
+    "roof_z": 2.21,                 # underside of the roof
+    "floor_z": 0.48,                # cabin floor (a footwell below the sill)
+    "seat_z": 0.78,                 # rear seat cushion top
+    "seat_back_x": -0.26,           # front face of the rear backrest
+    "seat_front_x": -0.76,          # front edge of the rear cushion
+    "front_seat_x": -1.12,          # back face of the front seats
+    "cabin_front_x": -1.95, "cabin_rear_x": -0.26,
 }
 # door-local points (x along the door from the hinge, y outward, z up)
-TAXI_HANDLE_OUT = Vector((0.74, 0.035, 0.80))   # outside handle
-TAXI_GRIP_IN = Vector((0.36, -0.085, 0.72))      # inside armrest / pull
-TAXI_FRAME_IN = Vector((0.82, -0.04, 1.05))      # rear edge of the window frame, inside
+TAXI_HANDLE_OUT = Vector((0.67, 0.02, 1.106))    # the handle on the car's texture
+TAXI_GRIP_IN = Vector((0.24, -0.07, 1.12))       # inside, below the window (near the hinge)
+TAXI_FRAME_IN = Vector((0.72, -0.21, 1.30))      # rear edge of the window frame, inside (the glass leans in)
 
 
 # ---------------------------------------------------------------------------
@@ -292,66 +292,8 @@ def animate_bicycle(lean, wheels, crank, frames, name, state):
 
 
 def build_taxi(root):
-    t = TAXI
-    paint = material("Taxi_Paint", (0.95, 0.72, 0.08, 1), 0.4)
-    dark = material("Taxi_Trim", (0.08, 0.08, 0.09, 1), 0.6)
-    black = material("Bike_Rubber", (0.05, 0.05, 0.05, 1), 0.9)
-    seat = material("Taxi_Seat", (0.25, 0.18, 0.14, 1), 0.8)
-    check = material("Taxi_Check", (0.95, 0.95, 0.92, 1), 0.5)
-    light = material("Taxi_Light", (1.0, 0.95, 0.75, 1), 0.3)
-    sy, w = t["side_y"], t["width"]
-    yc = sy - w / 2
-    far = sy - w
-    hx, dw = t["hinge"].x, t["door_w"]
-    cab0, cab1 = -2.0, 0.08          # cabin x range (windscreen base .. rear window)
-    belt = 0.84                      # top of the doors / bonnet line
-    th = 0.06                        # panel thickness
-
-    def panel(name, x0, x1, y0, y1, z0, z1, mat=paint, parent=root):
-        return box(name, (x1 - x0, y1 - y0, z1 - z0), ((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2), mat, parent)
-
-    # chassis: floor, bonnet, boot, sills
-    panel("Taxi_Floor", cab0, cab1, far, sy, t["floor_z"] - 0.06, t["floor_z"], dark)
-    panel("Taxi_Bonnet", t["front"], cab0, far, sy, 0.20, belt)
-    panel("Taxi_Boot", cab1, t["rear"], far, sy, 0.20, belt)
-    panel("Taxi_SillR", cab0, cab1, sy - th, sy, 0.16, t["sill_z"])
-    panel("Taxi_SideL", cab0, cab1, far, far + th, 0.16, belt)
-    panel("Taxi_FrontDoor", cab0, hx - 0.06, sy - th, sy, t["sill_z"], belt)
-    panel("Taxi_RearQuarter", hx + dw, cab1, sy - th, sy, t["sill_z"], belt)
-    panel("Taxi_BumperF", t["front"] - 0.06, t["front"], far + 0.05, sy - 0.05, 0.20, 0.36, dark)
-    panel("Taxi_BumperR", t["rear"], t["rear"] + 0.06, far + 0.05, sy - 0.05, 0.20, 0.36, dark)
-    # cabin: pillars and roof (no glass, so the passenger stays visible)
-    top = t["roof_z"]
-    for x0, x1 in ((cab0, cab0 + 0.08), (hx - 0.06, hx), (cab1 - 0.32, cab1)):
-        for y0, y1 in ((sy - th, sy), (far, far + th)):
-            panel("Taxi_Pillar", x0, x1, y0, y1, belt, top, dark)
-    panel("Taxi_RearWall", cab1 - th, cab1, far, sy, belt, top, dark)
-    panel("Taxi_FrontRail", hx + 0.0, hx + dw, sy - th, sy, t["opening_top"], top, dark)
-    panel("Taxi_Roof", cab0, cab1, far, sy, top, top + 0.07)
-    panel("Taxi_Sign", -1.12, -0.82, yc - 0.18, yc + 0.18, top + 0.07, top + 0.20, light)
-    panel("Taxi_Stripe", t["front"], t["rear"], sy - 0.002, sy + 0.004, 0.50, 0.56, check, root)
-    # seats
-    panel("Taxi_RearSeat", t["seat_front_x"], t["seat_back_x"], far + th, sy - 0.14, 0.20, t["seat_z"], seat)
-    panel("Taxi_RearBack", t["seat_back_x"], cab1 - th, far + th, sy - th, t["seat_z"], 1.02, seat)
-    panel("Taxi_FrontSeat", t["front_seat_x"] - 0.48, t["front_seat_x"] - 0.10, far + th, sy - th, 0.22, 0.38, seat)
-    panel("Taxi_FrontBack", t["front_seat_x"] - 0.12, t["front_seat_x"], far + th, sy - th, 0.38, 1.08, seat)
-    # wheels
-    for x in t["wheels_x"]:
-        for y in (sy + 0.01, far - 0.01):
-            cylinder_between("Taxi_Wheel", Vector((x, y - 0.11, t["wheel_r"])), Vector((x, y + 0.11, t["wheel_r"])),
-                             t["wheel_r"], black, root, 16)
-    # rear door, pivoting about the hinge
-    door = empty("Taxi_Door", root)
-    door.location = t["hinge"]
-    panel("Taxi_DoorPanel", 0.0, dw, -th, 0.0, t["sill_z"] + 0.01, belt, paint, door)
-    panel("Taxi_DoorStripe", 0.0, dw, -0.002, 0.004, 0.50, 0.56, check, door)
-    panel("Taxi_DoorFrameTop", 0.0, dw, -0.04, 0.0, t["opening_top"] - 0.05, t["opening_top"], dark, door)
-    panel("Taxi_DoorFrameRear", dw - 0.05, dw, -0.04, 0.0, belt, t["opening_top"], dark, door)
-    h = TAXI_HANDLE_OUT
-    panel("Taxi_Handle", h.x - 0.06, h.x + 0.04, 0.0, 0.025, h.z - 0.015, h.z + 0.015, dark, door)
-    g = TAXI_GRIP_IN
-    panel("Taxi_Armrest", g.x - 0.18, g.x + 0.12, -th - 0.05, -th, g.z - 0.05, g.z, dark, door)
-    return door
+    import taxi
+    return taxi.build(root)
 
 
 def animate_taxi(door, frames, name, angle):

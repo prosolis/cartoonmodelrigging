@@ -20,12 +20,14 @@ import rigkit  # noqa: E402
 
 SHAFT = (Vector((0, -0.10, 0)), Vector((0, 1.0, 0)))
 SHAFT_RADIUS = 0.025
+CS = props.CELLO_SCALE
 # prop, capsule start, end, radius, animations
 CHECKS = [
     ("Umbrella", SHAFT[0], SHAFT[1], SHAFT_RADIUS, ("Umbrella_Idle-loop", "Umbrella_Walk-loop")),
-    ("Cello_Carried", Vector((0, 0.55, 0.02)), Vector((0, 1.0, 0.0)), 0.045,
+    ("Cello_Carried", Vector((0, 0.55, 0.02)) * CS, Vector((0, 1.0, 0.0)) * CS, 0.045 * CS,
      ("Cello_Carry_Idle-loop", "Cello_Carry_Walk-loop")),
-    ("Cello_Played", Vector((0, 0.55, 0.02)), Vector((0, 1.0, 0.0)), 0.045, ("Cello_Play-loop", "Cello_Rest-loop")),
+    ("Cello_Played", Vector((0, 0.55, 0.02)) * CS, Vector((0, 1.0, 0.0)) * CS, 0.045 * CS,
+     ("Cello_Play-loop", "Cello_Rest-loop")),
 ]
 
 

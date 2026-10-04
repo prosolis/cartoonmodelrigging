@@ -67,7 +67,8 @@ from it.
 - The hands are mittens and the rig has no finger or face bones, so the poses are stylised.
 - Props sit at a placement that clears the heads of all characters (the umbrella shaft and cello
   neck pass at least 6 cm from every head; checked with `tools/check_clearance.py`). Because the
-  heads are big, the played cello leans further left than a real one would. The phone at the ear is set
+  heads are big, the cello is scaled up (it reads as a viola at "true" size next to them) and
+  the played cello leans further left than a real one would. The phone at the ear is set
   for a typical head width, so on the two widest heads (Character_3 and Character_4) it can
   overlap the hair a little.
 

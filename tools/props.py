@@ -254,9 +254,15 @@ def ellipsoid(name, radii, loc, mat, parent=None):
     return _finish(o, mat, parent)
 
 
-def build_cello(root):
+# The cartoon heads are huge, so a cello scaled to body height looks like a viola;
+# everything below is modelled at "unit" size and scaled by this factor.
+CELLO_SCALE = 1.35
+
+
+def build_cello(root, endpin=True):
     # local frame: +Y up the instrument, origin where the endpin leaves the body,
-    # strings on the +Z side, width along X
+    # strings on the +Z side, width along X (modelled at unit size, scaled by CELLO_SCALE)
+    first = len(root.children)
     wood = material("Cello_Wood", (0.55, 0.22, 0.07, 1), 0.45)
     dark = material("Cello_Ebony", (0.04, 0.03, 0.03, 1), 0.5)
     light = material("Cello_Bridge", (0.85, 0.7, 0.5, 1), 0.6)
@@ -272,7 +278,10 @@ def build_cello(root):
     box("Cello_Tailpiece", (0.055, 0.15, 0.012), (0, 0.15, 0.066), dark, root)
     for x in (-0.018, -0.006, 0.006, 0.018):
         cylinder_between("Cello_String", (x, 0.08, 0.077), (x, 0.88, 0.072), 0.0018, metal, root, 4)
-    cylinder_between("Cello_Endpin", (0, 0.0, 0), (0, -0.15, 0), 0.006, metal, root, 6)
+    if endpin:  # retracted when carrying
+        cylinder_between("Cello_Endpin", (0, 0.0, 0), (0, -0.15, 0), 0.006, metal, root, 6)
+    for o in list(root.children)[first:]:
+        o.matrix_basis = Matrix.Scale(CELLO_SCALE, 4) @ o.matrix_basis
 
 
 def build_bow(root):
@@ -291,7 +300,7 @@ BUILDERS = {
     "Umbrella": build_umbrella,
     "Phone": build_phone,
     "Chair": build_chair,
-    "Cello_Carried": build_cello,
+    "Cello_Carried": lambda root: build_cello(root, endpin=False),
     "Cello_Played": build_cello,
     "Bow": build_bow,
 }

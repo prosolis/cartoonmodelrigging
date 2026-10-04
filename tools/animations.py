@@ -965,11 +965,12 @@ def wait_hands_behind(ctx, frames):
 # Cello model space: +Y up the instrument, origin where the endpin leaves the
 # body (endpin goes to y=-0.15), strings on the +Z side, width along X.
 
-CELLO_GRIP_Y = 0.70          # where the carrying hand holds the neck
-CELLO_STRINGS_Z = 0.075      # string height above the body centre plane
+from props import CELLO_SCALE as CELLO_S  # noqa: E402  (cello is modelled at unit size)
+CELLO_GRIP_Y = 0.62 * CELLO_S   # carrying hand: on the neck just above the body
+CELLO_STRINGS_Z = 0.075 * CELLO_S  # string height above the body centre plane
 CELLO_CARRY = {"x": -0.27, "y": -0.46, "z": 0.21}
-CELLO_PLAY_ENDPIN = V(0.08, -0.40, 0.0)
-CELLO_PLAY_AXIS = V(0.37, 0.06, 1.0)  # leans left (clear of the big heads), slightly back
+CELLO_PLAY_ENDPIN = V(0.06, -0.40, 0.0)
+CELLO_PLAY_AXIS = V(0.44, 0.10, 1.0)  # leans left (clear of the big heads), slightly back
 
 
 def cello_play_matrix(ctx=None, p=None):
@@ -977,7 +978,7 @@ def cello_play_matrix(ctx=None, p=None):
     z = FWD - u * FWD.dot(u)
     z.normalize()
     m = Matrix((u.cross(z), u, z)).transposed().to_4x4()
-    m.translation = CELLO_PLAY_ENDPIN + u * 0.15
+    m.translation = CELLO_PLAY_ENDPIN + u * 0.15 * CELLO_S
     return m
 
 
@@ -1060,10 +1061,10 @@ def _cello_seated(ctx, p, ph, sway=1.0):
 
 
 def _cello_left_hand(p, cm, cx, cy, cz, ph, shifts=True):
-    pos_y = 0.76 + (0.06 * smooth(0.5 + 0.5 * wave(ph * 2, 0.15)) if shifts else 0.0)
+    pos_y = (0.72 + (0.07 * smooth(0.5 + 0.5 * wave(ph * 2, 0.15)) if shifts else 0.0)) * CELLO_S
     vib = 0.006 * wave(ph * 24)
-    neck = cm @ V(0, pos_y + vib, 0.02)
-    palm = neck + cx * 0.07 - cz * 0.01
+    neck = cm @ V(0, pos_y + vib, 0.02 * CELLO_S)
+    palm = neck + cx * 0.075 - cz * 0.01
     arm_to(p, "L", palm, cz + RIGHT * 0.6, -cx + cz * 0.2, cx + DOWN * 0.4 + BACK * 0.3)
 
 
@@ -1078,7 +1079,7 @@ def cello_play(ctx, frames):
         s = 0.12 + 0.44 * stroke
         string_tilt = 6 * wave(ph, 0.2)
         d = (rot(cz, string_tilt) @ cx).normalized()
-        contact = cm @ V(0, 0.40, CELLO_STRINGS_Z)
+        contact = cm @ V(0, 0.40 * CELLO_S, CELLO_STRINGS_Z)
         origin = contact - d * s + cz * 0.022
         z = cz - d * cz.dot(d)
         z.normalize()

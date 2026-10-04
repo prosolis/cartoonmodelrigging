@@ -1,9 +1,9 @@
-"""Measure how close the umbrella shaft gets to the head mesh in the umbrella animations.
+"""Measure how close long props (umbrella shaft, cello neck) get to the head mesh.
 
     python tools/check_clearance.py [CHARACTER.glb ...]
 
 Head vertices (weighted mostly to the Head bone) are moved rigidly with the
-Head bone, the shaft is a segment in IteamSlot.R space. Prints the minimum
+Head bone; each prop part is a capsule (segment + radius) in the prop's space. Prints the minimum
 distance per animation; negative means the shaft is inside the head hull.
 """
 import glob
@@ -20,6 +20,15 @@ import rigkit  # noqa: E402
 
 SHAFT = (Vector((0, -0.10, 0)), Vector((0, 1.0, 0)))
 SHAFT_RADIUS = 0.025
+CS = props.CELLO_SCALE
+# prop, capsule start, end, radius, animations
+CHECKS = [
+    ("Umbrella", SHAFT[0], SHAFT[1], SHAFT_RADIUS, ("Umbrella_Idle-loop", "Umbrella_Walk-loop")),
+    ("Cello_Carried", Vector((0, 0.55, 0.02)) * CS, Vector((0, 1.0, 0.0)) * CS, 0.045 * CS,
+     ("Cello_Carry_Idle-loop", "Cello_Carry_Walk-loop")),
+    ("Cello_Played", Vector((0, 0.55, 0.02)) * CS, Vector((0, 1.0, 0.0)) * CS, 0.045 * CS,
+     ("Cello_Play-loop", "Cello_Rest-loop")),
+]
 
 
 def head_points(path):
@@ -54,24 +63,26 @@ def main(paths):
     ctx = animations.Ctx(rig, src)
     for o in objs:
         bpy.data.objects.remove(o, do_unlink=True)
-    bone, off = props.load_offsets()["Umbrella"]
+    offsets = props.load_offsets()
     head_rest_inv = rig.rest["Head"].inverted()
     worst_all = 1e9
     for path in paths:
         pts = [head_rest_inv @ p for p in head_points(path)]
-        for name in ("Umbrella_Idle-loop", "Umbrella_Walk-loop"):
-            fn, frames, _ = animations.ANIMATIONS[name]
-            pose_fn = fn(ctx, frames)
-            worst = (1e9, None)
-            for fr in range(0, frames + 1, 2):
-                p = pose_fn(fr)
-                m = p.world(bone) @ off
-                a, b = m @ SHAFT[0], m @ SHAFT[1]
-                hw = p.world("Head")
-                d = min(seg_dist(hw @ q, a, b) for q in pts) - SHAFT_RADIUS
-                worst = min(worst, (d, fr))
-            worst_all = min(worst_all, worst[0])
-            print(f"{os.path.basename(path):28s} {name:20s} min clearance {worst[0]:+.3f} at frame {worst[1]}")
+        for prop, c0, c1, radius, anims in CHECKS:
+            bone, off = offsets[prop]
+            for name in anims:
+                fn, frames, _ = animations.ANIMATIONS[name]
+                pose_fn = fn(ctx, frames)
+                worst = (1e9, None)
+                for fr in range(0, frames + 1, 2):
+                    p = pose_fn(fr)
+                    m = off if bone is None else p.world(bone) @ off
+                    a, b = m @ c0, m @ c1
+                    hw = p.world("Head")
+                    d = min(seg_dist(hw @ q, a, b) for q in pts) - radius
+                    worst = min(worst, (d, fr))
+                worst_all = min(worst_all, worst[0])
+                print(f"{os.path.basename(path):28s} {name:22s} min clearance {worst[0]:+.3f} at frame {worst[1]}")
     return worst_all
 
 

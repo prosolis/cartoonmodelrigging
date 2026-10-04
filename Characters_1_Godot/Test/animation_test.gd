@@ -5,13 +5,17 @@ extends Node3D
 
 const CROWD_SIZE := 12
 
-# Props for some of the added animations: animation name prefix -> [prop scene, bone].
-# An empty bone means the prop is placed at the character root (the bicycle).
+# Props for some of the added animations: animation name prefix -> list of [prop scene, bone].
+# An empty bone means the prop is placed at the character root (bicycle, chair, played cello).
 const PROPS := {
-	"Carry_Box": ["Props/Box.glb", "Torso"],
-	"Umbrella": ["Props/Umbrella.glb", "IteamSlot.R"],
-	"Phone": ["Props/Phone.glb", "IteamSlot.R"],
-	"Cycling": ["Props/Bicycle.glb", ""],
+	"Carry_Box": [["Props/Box.glb", "Torso"]],
+	"Umbrella": [["Props/Umbrella.glb", "IteamSlot.R"]],
+	"Phone": [["Props/Phone.glb", "IteamSlot.R"]],
+	"Cycling": [["Props/Bicycle.glb", ""]],
+	"Sit_Chair": [["Props/Chair.glb", ""]],
+	"Cello_Carry": [["Props/Cello_Carried.glb", "IteamSlot.R"]],
+	"Cello_Play": [["Props/Cello_Played.glb", ""], ["Props/Bow.glb", "IteamSlot.R"], ["Props/Chair.glb", ""]],
+	"Cello_Rest": [["Props/Cello_Played.glb", ""], ["Props/Bow.glb", "IteamSlot.R"], ["Props/Chair.glb", ""]],
 }
 
 var pack_dir := ""
@@ -193,41 +197,45 @@ func _clear_props() -> void:
 
 func _attach_props(anim: String) -> void:
 	_clear_props()
-	var entry: Array = []
+	var entries: Array = []
 	for prefix in PROPS:
 		if anim.begins_with(prefix):
-			entry = PROPS[prefix]
-	if entry.is_empty():
+			entries = PROPS[prefix]
+	for entry in entries:
+		var scene := load(pack_dir + "/" + String(entry[0])) as PackedScene
+		if scene == null:
+			push_warning("Prop not found: " + String(entry[0]))
+			continue
+		for i in shown.size():
+			_attach_prop(scene, String(entry[1]), i, anim)
+
+
+func _attach_prop(scene: PackedScene, bone: String, i: int, anim: String) -> void:
+	var ch := shown[i]
+	var prop := scene.instantiate() as Node3D
+	if bone.is_empty():
+		# root prop: the placement is baked into the scene
+		ch.add_child(prop)
+		props.append(prop)
+		# the bicycle has its own wheel/crank loop: play it in sync with the rider
+		var prop_ap := prop.find_child("AnimationPlayer", true, false) as AnimationPlayer
+		var prop_anim := "Coast" if anim.contains("Coast") else "Pedal"
+		if prop_ap and prop_ap.has_animation(prop_anim):
+			prop_ap.play(prop_anim)
+			prop_ap.seek(players[i].current_animation_position, true)
+			prop_ap.speed_scale = players[i].speed_scale
+			prop_players.append(prop_ap)
 		return
-	var scene := load(pack_dir + "/" + String(entry[0])) as PackedScene
-	if scene == null:
-		push_warning("Prop not found: " + String(entry[0]))
+	# bone prop: the offset is baked into the prop scene, so identity under the attachment
+	var skel := ch.find_child("Skeleton3D", true, false) as Skeleton3D
+	if skel == null:
+		prop.queue_free()
 		return
-	for i in shown.size():
-		var ch := shown[i]
-		var prop := scene.instantiate() as Node3D
-		if String(entry[1]).is_empty():
-			# root prop (bicycle): play its wheel/crank loop in sync with the rider
-			ch.add_child(prop)
-			props.append(prop)
-			var bike_ap := prop.find_child("AnimationPlayer", true, false) as AnimationPlayer
-			var bike_anim := "Coast" if anim.contains("Coast") else "Pedal"
-			if bike_ap and bike_ap.has_animation(bike_anim):
-				bike_ap.play(bike_anim)
-				bike_ap.seek(players[i].current_animation_position, true)
-				bike_ap.speed_scale = players[i].speed_scale
-				prop_players.append(bike_ap)
-		else:
-			# bone prop: the offset is baked into the prop scene, so identity under the attachment
-			var skel := ch.find_child("Skeleton3D", true, false) as Skeleton3D
-			if skel == null:
-				prop.queue_free()
-				continue
-			var att := BoneAttachment3D.new()
-			att.bone_name = String(entry[1])
-			skel.add_child(att)
-			att.add_child(prop)
-			props.append(att)
+	var att := BoneAttachment3D.new()
+	att.bone_name = bone
+	skel.add_child(att)
+	att.add_child(prop)
+	props.append(att)
 
 
 func _spawn(path: String, pos: Vector3) -> void:

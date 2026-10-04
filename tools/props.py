@@ -35,6 +35,10 @@ ANIM_PROPS = {
     "Sit_Chair_Down": ["Chair"],
     "Sit_Chair_StandUp": ["Chair"],
     "Sit_Chair_Talk-loop": ["Chair"],
+    "Cello_Carry_Idle-loop": ["Cello_Carried"],
+    "Cello_Carry_Walk-loop": ["Cello_Carried"],
+    "Cello_Play-loop": ["Cello_Played", "Bow", "Chair"],
+    "Cello_Rest-loop": ["Cello_Played", "Bow", "Chair"],
 }
 
 BIKE = {
@@ -240,11 +244,65 @@ def animate_bicycle(wheels, crank, frames, name, crank_turns=1.0, wheel_turns=1.
         obj.animation_data.action = None
 
 
+def ellipsoid(name, radii, loc, mat, parent=None):
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=1, location=(0, 0, 0))
+    o = bpy.context.active_object
+    o.name = name
+    o.scale = radii
+    bpy.ops.object.transform_apply(scale=True)
+    o.location = loc
+    return _finish(o, mat, parent)
+
+
+# The cartoon heads are huge, so a cello scaled to body height looks like a viola;
+# everything below is modelled at "unit" size and scaled by this factor.
+CELLO_SCALE = 1.35
+
+
+def build_cello(root, endpin=True):
+    # local frame: +Y up the instrument, origin where the endpin leaves the body,
+    # strings on the +Z side, width along X (modelled at unit size, scaled by CELLO_SCALE)
+    first = len(root.children)
+    wood = material("Cello_Wood", (0.55, 0.22, 0.07, 1), 0.45)
+    dark = material("Cello_Ebony", (0.04, 0.03, 0.03, 1), 0.5)
+    light = material("Cello_Bridge", (0.85, 0.7, 0.5, 1), 0.6)
+    metal = material("Cello_Metal", (0.75, 0.75, 0.78, 1), 0.3, 1.0)
+    ellipsoid("Cello_LowerBout", (0.205, 0.20, 0.07), (0, 0.19, 0), wood, root)
+    ellipsoid("Cello_UpperBout", (0.17, 0.155, 0.065), (0, 0.45, 0), wood, root)
+    box("Cello_Neck", (0.045, 0.30, 0.04), (0, 0.72, 0.015), wood, root)
+    box("Cello_Fingerboard", (0.055, 0.44, 0.014), (0, 0.66, 0.062), dark, root)
+    box("Cello_Pegbox", (0.045, 0.09, 0.045), (0, 0.905, 0.01), wood, root)
+    ellipsoid("Cello_Scroll", (0.03, 0.035, 0.035), (0, 0.97, 0.0), wood, root)
+    box("Cello_Pegs", (0.11, 0.012, 0.012), (0, 0.90, 0.01), dark, root)
+    box("Cello_Bridge", (0.085, 0.055, 0.01), (0, 0.30, 0.075), light, root)
+    box("Cello_Tailpiece", (0.055, 0.15, 0.012), (0, 0.15, 0.066), dark, root)
+    for x in (-0.018, -0.006, 0.006, 0.018):
+        cylinder_between("Cello_String", (x, 0.08, 0.077), (x, 0.88, 0.072), 0.0018, metal, root, 4)
+    if endpin:  # retracted when carrying
+        cylinder_between("Cello_Endpin", (0, 0.0, 0), (0, -0.15, 0), 0.006, metal, root, 6)
+    for o in list(root.children)[first:]:
+        o.matrix_basis = Matrix.Scale(CELLO_SCALE, 4) @ o.matrix_basis
+
+
+def build_bow(root):
+    # local frame: origin at the frog (in the fist), stick along +Y, hair on the -Z side
+    stick = material("Bow_Stick", (0.35, 0.15, 0.06, 1), 0.4)
+    hair = material("Bow_Hair", (0.92, 0.9, 0.82, 1), 0.8)
+    dark = material("Cello_Ebony", (0.04, 0.03, 0.03, 1), 0.5)
+    cylinder_between("Bow_Stick", (0, -0.03, 0), (0, 0.66, 0.0), 0.006, stick, root, 6)
+    box("Bow_Frog", (0.012, 0.045, 0.028), (0, 0.0, -0.014), dark, root)
+    box("Bow_Hair", (0.008, 0.64, 0.002), (0, 0.33, -0.024), hair, root)
+    box("Bow_Tip", (0.01, 0.015, 0.026), (0, 0.655, -0.012), stick, root)
+
+
 BUILDERS = {
     "Box": build_box,
     "Umbrella": build_umbrella,
     "Phone": build_phone,
     "Chair": build_chair,
+    "Cello_Carried": lambda root: build_cello(root, endpin=False),
+    "Cello_Played": build_cello,
+    "Bow": build_bow,
 }
 
 
@@ -293,7 +351,10 @@ def attach_for_animation(anim, char_arm):
                     o.animation_data.action = tr.strips[0].action
                     for t in tracks:
                         o.animation_data.nla_tracks.remove(t)
-        if name in offsets:
+        if name in offsets and offsets[name][0] is None:
+            root.parent = char_arm
+            root.matrix_basis = offsets[name][1]
+        elif name in offsets:
             bone, m = offsets[name]
             root.parent = char_arm
             root.parent_type = "BONE"
@@ -311,12 +372,12 @@ def export_all(cycle_frames):
     """Export every prop glb into Characters_1_Godot/Props/."""
     os.makedirs(PROPS_DIR, exist_ok=True)
     offsets = load_offsets()
-    for name in ["Box", "Umbrella", "Phone", "Bicycle"]:
+    for name in ["Box", "Umbrella", "Phone", "Bicycle", "Chair", "Cello_Carried", "Cello_Played", "Bow"]:
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o, do_unlink=True)
         root = build(name, cycle_frames if name == "Bicycle" else None)
-        bone_prop = name in offsets
-        if bone_prop:
+        bone_prop = name in offsets and offsets[name][0] is not None
+        if name in offsets:
             root.matrix_basis = offsets[name][1]
         bpy.ops.object.select_all(action="DESELECT")
         for o in [root] + list(root.children_recursive):
@@ -330,3 +391,5 @@ def export_all(cycle_frames):
             export_optimize_animation_keep_anim_object=True,
         )
         print("exported prop", name, "->", offsets[name][0] if bone_prop else "character root")
+    for o in list(bpy.data.objects):
+        bpy.data.objects.remove(o, do_unlink=True)

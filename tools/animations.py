@@ -963,22 +963,27 @@ def wait_hands_behind(ctx, frames):
 # cut between carrying and playing with a visual effect.
 #
 # Cello model space: +Y up the instrument, origin where the endpin leaves the
-# body (endpin goes to y=-0.15), strings on the +Z side, width along X.
+# body (endpin goes to y=-CELLO_ENDPIN), strings on the +Z side, width along X.
 
-from props import CELLO_SCALE as CELLO_S  # noqa: E402  (cello is modelled at unit size)
+from props import CELLO_ENDPIN, CELLO_SCALE as CELLO_S  # noqa: E402  (cello is modelled at unit size)
 CELLO_GRIP_Y = 0.62 * CELLO_S   # carrying hand: on the neck just above the body
 CELLO_STRINGS_Z = 0.075 * CELLO_S  # string height above the body centre plane
 CELLO_CARRY = {"x": -0.27, "y": -0.46, "z": 0.21}
-CELLO_PLAY_ENDPIN = V(0.06, -0.40, 0.0)
-CELLO_PLAY_AXIS = V(0.44, 0.10, 1.0)  # leans left (clear of the big heads), slightly back
+# Played: the back of the upper bout rests against the chest (top of the body
+# below the shoulders), the lower bout between the knees, the endpin forward on
+# the floor. The cello leans back toward the player and, because the heads are
+# so big, further to the player's left than a real one so the neck clears them.
+CELLO_PLAY_ENDPIN = V(-0.25, -0.35, 0.0)  # endpin tip on the floor, right of centre
+CELLO_PLAY_LEAN = (10.0, 35.0)  # degrees: back toward the player, to the player's left
 
 
 def cello_play_matrix(ctx=None, p=None):
-    u = CELLO_PLAY_AXIS.normalized()
+    back, left = (math.radians(a) for a in CELLO_PLAY_LEAN)
+    u = V(math.tan(left), math.tan(back), 1).normalized()
     z = FWD - u * FWD.dot(u)
     z.normalize()
     m = Matrix((u.cross(z), u, z)).transposed().to_4x4()
-    m.translation = CELLO_PLAY_ENDPIN + u * 0.15 * CELLO_S
+    m.translation = CELLO_PLAY_ENDPIN + u * CELLO_ENDPIN * CELLO_S
     return m
 
 
@@ -1054,7 +1059,7 @@ def _cello_seated(ctx, p, ph, sway=1.0):
     p.rotate("Torso", FWD, -2.5 * sway * wave(ph))
     p.rotate("Torso", UP, 4)
     breathe(p, ph * 3)
-    look(p, yaw=10, pitch=10 + 3 * sway * wave(ph * 2), roll=-9 - 3 * sway * wave(ph))
+    look(p, yaw=10, pitch=10 + 3 * sway * wave(ph * 2), roll=-2 * sway * wave(ph))  # upright: clear of the neck
     cm = cello_play_matrix()
     cx, cy, cz = (cm.to_3x3().col[i].normalized() for i in range(3))
     return cm, cx, cy, cz

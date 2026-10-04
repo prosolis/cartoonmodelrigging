@@ -257,6 +257,7 @@ def ellipsoid(name, radii, loc, mat, parent=None):
 # The cartoon heads are huge, so a cello scaled to body height looks like a viola;
 # everything below is modelled at "unit" size and scaled by this factor.
 CELLO_SCALE = 1.35
+CELLO_ENDPIN = 0.07  # endpin length when played (unit size), short so the body sits at chest height
 
 
 def build_cello(root, endpin=True):
@@ -279,7 +280,7 @@ def build_cello(root, endpin=True):
     for x in (-0.018, -0.006, 0.006, 0.018):
         cylinder_between("Cello_String", (x, 0.08, 0.077), (x, 0.88, 0.072), 0.0018, metal, root, 4)
     if endpin:  # retracted when carrying
-        cylinder_between("Cello_Endpin", (0, 0.0, 0), (0, -0.15, 0), 0.006, metal, root, 6)
+        cylinder_between("Cello_Endpin", (0, 0.0, 0), (0, -CELLO_ENDPIN, 0), 0.006, metal, root, 6)
     for o in list(root.children)[first:]:
         o.matrix_basis = Matrix.Scale(CELLO_SCALE, 4) @ o.matrix_basis
 

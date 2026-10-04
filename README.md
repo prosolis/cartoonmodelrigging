@@ -57,7 +57,10 @@ prop appears.
 `Cello_Carry_*` to `Cello_Play`/`Cello_Rest` behind a visual transition (a puff, fade or similar),
 swapping `Cello_Carried.glb` for `Cello_Played.glb` + `Bow.glb` + a chair at the same moment. The
 played cello stands at a fixed spot in front of the seated character, so it lines up with the chair
-pose (and `Props/Chair.glb`) as long as the character's root stays put.
+pose (and `Props/Chair.glb`) as long as the character's root stays put. It is held the way a cellist
+holds it: the back of the upper bout against the chest (below the shoulders), the lower bout
+between the knees, the endpin forward on the floor, and the left hand on the neck at about
+shoulder height.
 
 **Chair:** sitting moves the hips back about 0.17 from the character's root, and the seat surface
 is at a height of about 0.27. Put the character's root at the front edge of the chair, facing away
@@ -65,10 +68,11 @@ from it.
 
 **Notes / limits**
 - The hands are mittens and the rig has no finger or face bones, so the poses are stylised.
-- Props sit at a placement that clears the heads of all characters (the umbrella shaft and cello
-  neck pass at least 6 cm from every head; checked with `tools/check_clearance.py`). Because the
-  heads are big, the cello is scaled up (it reads as a viola at "true" size next to them) and
-  the played cello leans further left than a real one would. The phone at the ear is set
+- Props sit at a placement that clears the heads of all characters (the umbrella shaft passes at
+  least 6 cm and the cello neck at least 4.8 cm from every head; checked with
+  `tools/check_clearance.py`). Because the heads are big, the cello is scaled up (it reads as a
+  viola at "true" size next to them) and the played cello leans further to the player's left
+  than a real one would, so its neck passes beside the head instead of through it. The phone at the ear is set
   for a typical head width, so on the two widest heads (Character_3 and Character_4) it can
   overlap the hair a little.
 

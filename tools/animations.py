@@ -641,8 +641,28 @@ def shiver_cold(ctx, frames):
 
 
 # ---------------------------------------------------------------------------
-# Cycling (Props/Bicycle.glb placed at the character root; play its
-# "Pedal-loop" / "Coast-loop" alongside so the crank matches the feet)
+# Cycling (Props/Bicycle.glb placed at the character root). The bicycle has its
+# own animation for each riding clip (BIKE_TRACKS): play it alongside so the
+# crank, wheels and lean match the rider. Both are driven by the same bike
+# state functions below: (lean in degrees, crank angle, wheel angle) per frame.
+#
+# Stopping: the rider stays on the saddle (their legs are too short to
+# straddle the top tube), the bike leans onto the left foot and the right foot
+# waits on the raised pedal. Cycling_Stop starts from the Cycling_Coast pose;
+# Cycling_Start ends on frame 0 of Cycling.
+
+BIKE_LEAN = 18.0  # degrees the stopped bike leans to the rider's left (so the toe reaches the ground)
+CRANK_READY = math.pi / 4  # crank angle at rest: right pedal raised forward, ready to push
+STOP_FRAMES, START_FRAMES = 45, 36
+_PEDAL_FRAMES, _COAST_FRAMES = 24, 60
+# wheel turns per Pedal loop: a whole number of spoke steps (45deg), so the loop has no jump
+PEDAL_WHEEL_TURNS = 1.625
+_W_PEDAL = 2 * math.pi * PEDAL_WHEEL_TURNS / _PEDAL_FRAMES  # wheel speed (rad/frame) while pedalling
+_W_COAST = 2 * math.pi * 2.5 / _COAST_FRAMES
+_C_PEDAL = 2 * math.pi / _PEDAL_FRAMES  # crank speed while pedalling
+_STOP_BRAKE = 30  # frames the wheels take to stop
+# wheel angle while stopped, chosen so Cycling_Start ends where Pedal starts (spokes repeat every 45deg)
+_W_REST = -(_W_PEDAL * START_FRAMES / 2) % (math.pi / 4)
 
 
 def _bike():
@@ -650,24 +670,74 @@ def _bike():
     return props.BIKE
 
 
-def _ride(ctx, p, alpha, pedal=True, bob=0.0):
+def bike_pedal(f, frames):
+    return 0.0, 2 * math.pi * f / frames, 2 * math.pi * PEDAL_WHEEL_TURNS * f / frames
+
+
+def bike_coast(f, frames):
+    return 0.0, math.pi / 2, 2 * math.pi * 2.5 * f / frames
+
+
+def bike_stop(f, frames):
+    t = min(f, _STOP_BRAKE)
+    wheel = _W_REST - _W_COAST * _STOP_BRAKE / 2 + _W_COAST * (t - t * t / (2 * _STOP_BRAKE))
+    crank = math.pi / 2 - (math.pi / 2 - CRANK_READY) * ramp(f, 4, 22)  # back-pedal to the ready position
+    return BIKE_LEAN * ramp(f, 16, 36), crank, wheel
+
+
+def bike_rest(f, frames):
+    return BIKE_LEAN, CRANK_READY, _W_REST
+
+
+def bike_start(f, frames):
+    # crank accelerates from the ready position to pedalling speed, reaching a full turn (0) at the end
+    c0 = (2 * (2 * math.pi - CRANK_READY) / frames) - _C_PEDAL
+    crank = CRANK_READY + c0 * f + (_C_PEDAL - c0) * f * f / (2 * frames)
+    wheel = _W_REST + _W_PEDAL * f * f / (2 * frames)
+    return BIKE_LEAN * (1 - ramp(f, 2, 22)), crank, wheel
+
+
+# bicycle track -> (rider animation, bike state function)
+BIKE_TRACKS = {
+    "Pedal-loop": ("Cycling-loop", bike_pedal),
+    "Coast-loop": ("Cycling_Coast-loop", bike_coast),
+    "Stop": ("Cycling_Stop", bike_stop),
+    "Rest-loop": ("Cycling_Rest-loop", bike_rest),
+    "Start": ("Cycling_Start", bike_start),
+}
+
+
+def bike_track_for(anim):
+    return next((t for t, (a, _) in BIKE_TRACKS.items() if a == anim), None)
+
+
+def _ride(ctx, p, alpha, pedal=1.0, bob=0.0, lean=0.0, foot_down=0.0):
+    """Rider on the bike. lean: bike lean (deg, + = to the rider's left);
+    foot_down: 0 = left foot on its pedal .. 1 = left foot on the ground."""
     b = _bike()
+    bike = Matrix.Rotation(math.radians(lean), 4, "Y")  # the bike pivots about the ground line
     seat_top = b["seat"].z + 0.02
-    hips = V(0, b["seat"].y - 0.005, seat_top - 0.05 + bob)
-    roll = 2.0 * math.sin(alpha) if pedal else 0.0
-    hips_to(ctx, p, hips, pitch=12, roll=roll)
+    hips = bike @ V(0, b["seat"].y - 0.005, seat_top - 0.05 + bob)
+    roll = 2.0 * math.sin(alpha) * pedal
+    hips_to(ctx, p, hips, pitch=12, roll=roll - lean)
     p.rotate("Torso", LEFT, 14)
-    p.rotate("Torso", FWD, -roll * 0.8)
+    p.rotate("Torso", FWD, -roll * 0.8 + lean * 0.85)  # stay upright while the bike leans
     r = b["crank_r"]
     for s, a in (("L", alpha), ("R", alpha + math.pi)):
         sx = SIDE[s]
-        pedal_pos = b["crank"] + V(b["pedal_x"] * sx + 0.01 * sx, r * math.sin(a), -r * math.cos(a))
+        pedal_pos = bike @ (b["crank"] + V(b["pedal_x"] * sx + 0.01 * sx, r * math.sin(a), -r * math.cos(a)))
         ankle = pedal_pos + V(0, 0.05, 0.075)
-        p.leg_ik(s, ankle, V(0.12 * sx, -1, 0.3))
-        p.foot_flat(s, FWD, pitch=12 + 10 * math.sin(a + 0.6))
+        pitch = 12 + 10 * math.sin(a + 0.6)
+        k = foot_down if s == "L" else 0.0
+        if k > 0:
+            ground = V(hips.x + 0.20, b["crank"].y + 0.03, ctx.ankle["L"].z)
+            ankle = ankle.lerp(ground, smooth(k)) + V(0.02, 0, 0.07) * math.sin(math.pi * k)
+            pitch = lerp(pitch, 4.0, smooth(k))  # toe just down, touching the ground
+        p.leg_ik(s, ankle, V(0.12 * sx + 0.25 * k, -1, 0.3))
+        p.foot_flat(s, FWD, pitch=pitch)
     for s in "LR":
         sx = SIDE[s]
-        grip = V(b["grips"] * sx, b["bar"].y, b["bar"].z + 0.03)
+        grip = bike @ V(b["grips"] * sx, b["bar"].y, b["bar"].z + 0.03)
         arm_to(p, s, grip, FWD + DOWN * 0.6 - LEFT * sx * 0.2, DOWN + FWD * 0.5 - LEFT * sx * 0.3,
                V(sx * 0.9, 0.6, -0.2))
     look(p, pitch=-26, yaw=0)
@@ -675,7 +745,7 @@ def _ride(ctx, p, alpha, pedal=True, bob=0.0):
 
 def cycling(ctx, frames):
     def pose(fr):
-        alpha = 2 * math.pi * fr / frames
+        _, alpha, _ = bike_pedal(fr, frames)
         p = ctx.stand()
         _ride(ctx, p, alpha, bob=0.004 * math.cos(2 * alpha))
         return p
@@ -686,8 +756,50 @@ def cycling_coast(ctx, frames):
     def pose(fr):
         ph = fr / frames
         p = ctx.stand()
-        _ride(ctx, p, math.pi / 2, pedal=False, bob=0.003 * wave(ph * 2))
+        _ride(ctx, p, bike_coast(fr, frames)[1], pedal=0.0, bob=0.003 * wave(ph * 2))
         look(p, yaw=10 * wave(ph), pitch=2 * wave(ph * 2))
+        return p
+    return pose
+
+
+def cycling_stop(ctx, frames):
+    """From coasting: brake, back-pedal to the ready position, put the left foot down."""
+    def pose(fr):
+        lean, alpha, _ = bike_stop(fr, frames)
+        p = ctx.stand()
+        brake = math.sin(math.pi * ramp(fr, 2, 26))  # weight pitches forward under braking
+        _ride(ctx, p, alpha, pedal=0.0, lean=lean, foot_down=ramp(fr, 12, 32))
+        p.rotate("Torso", LEFT, 5 * brake)
+        look(p, pitch=-6 * brake + 14 * ramp(fr, 20, 44), yaw=-8 * ramp(fr, 26, 44))
+        return p
+    return pose
+
+
+def cycling_rest(ctx, frames):
+    """Stopped, left foot on the ground, looking around (as if at a crossing)."""
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        _ride(ctx, p, CRANK_READY, pedal=0.0, lean=BIKE_LEAN, foot_down=1.0)
+        breathe(p, ph * 3)
+        # look left and right, a little longer to the left
+        yaw = 30 * wave(ph) * (1.0 if wave(ph) > 0 else 0.8) - 8 * (1 - abs(wave(ph)))
+        look(p, pitch=14 + 3 * wave(ph * 2), yaw=yaw)
+        return p
+    return pose
+
+
+def cycling_start(ctx, frames):
+    """Push off from the stopped pose and pedal away; ends on frame 0 of Cycling."""
+    def pose(fr):
+        lean, alpha, _ = bike_start(fr, frames)
+        p = ctx.stand()
+        k = ramp(fr, 8, frames)
+        _ride(ctx, p, alpha, pedal=k, bob=0.004 * math.cos(2 * alpha) * k, lean=lean,
+              foot_down=1 - ramp(fr, 3, 18))
+        push = math.sin(math.pi * ramp(fr, 0, 20))
+        p.rotate("Torso", LEFT, 6 * push)  # lean into the first pedal stroke
+        look(p, pitch=14 * (1 - ramp(fr, 0, 16)), yaw=-8 * (1 - ramp(fr, 0, 12)))
         return p
     return pose
 
@@ -1149,6 +1261,9 @@ ANIMATIONS = {
     "Shiver_Cold-loop": (shiver_cold, 60, True),
     "Cycling-loop": (cycling, 24, True),
     "Cycling_Coast-loop": (cycling_coast, 60, True),
+    "Cycling_Stop": (cycling_stop, STOP_FRAMES, False),
+    "Cycling_Rest-loop": (cycling_rest, 90, True),
+    "Cycling_Start": (cycling_start, START_FRAMES, False),
     "Sit_Floor_Down": (sit_floor_down, 54, False),
     "Sit_Floor_Idle-loop": (sit_floor_idle, 120, True),
     "Sit_Floor_StandUp": (sit_floor_up, 54, False),

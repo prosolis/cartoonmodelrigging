@@ -3,7 +3,7 @@
 `Characters_1_Godot/` is the Characters_1 pack for Godot 4 (308 characters sharing one
 21-bone skeleton). The original zip is kept as `Characters_1_Godot.zip`.
 
-This repo adds **38 new animations** to the pack's shared animation library, plus a few
+This repo adds **40 new animations** to the pack's shared animation library, plus a few
 props that go with them. All 47 original animations are untouched.
 
 ![New animations](Characters_1_Godot/Preview_NewAnimations.png)
@@ -27,6 +27,7 @@ that suffix on import (`Wave_B-loop` shows up as `Wave_B`).
 | Cold | `Shiver_Cold` (hunched, shaking, rubbing hands) | |
 | Cycling | `Cycling` (pedalling), `Cycling_Coast`, `Cycling_Stop` (brake, left foot down), `Cycling_Rest` (stopped, looking both ways), `Cycling_Start` (push off) | `Props/Bicycle.glb` at the character root |
 | Cello | `Cello_Carry_Idle`, `Cello_Carry_Walk` (holding it by the neck), `Cello_Play` (seated, bowing), `Cello_Rest` (seated, bow down, swaying) | carrying: `Props/Cello_Carried.glb` on `IteamSlot.R`; playing: `Props/Cello_Played.glb` + `Props/Chair.glb` at the root, `Props/Bow.glb` on `IteamSlot.R` |
+| Police | `Police_Radio` (keys the shoulder mic, talks, lets go to listen), `Police_Ticket` (writes a ticket, glancing up at the car) | `Props/Radio_Mic.glb` on `Torso`; `Props/TicketBook.glb` on `IteamSlot.L` + `Props/Pen.glb` on `IteamSlot.R` |
 | Extras | `Talk`, `Clap`, `Cheer`, `Point_A`, `Nod_Yes`, `Shake_No`, `Shrug`, `Dance_A`, `Wait_HandsBehind` | |
 
 The walking variants are built on the pack's `Walk_C` cycle (1.03 s, in place), so they line up
@@ -38,7 +39,7 @@ Bone props have their offset baked into the file, so you attach them with an ide
 
 ```gdscript
 var att := BoneAttachment3D.new()
-att.bone_name = "IteamSlot.R"            # "Torso" for the box
+att.bone_name = "IteamSlot.R"            # "Torso" for the box and radio mic, "IteamSlot.L" for the ticket book
 skeleton.add_child(att)                    # the character's Armature/Skeleton3D
 att.add_child(preload("res://Characters_1_Godot/Props/Umbrella.glb").instantiate())
 ```
@@ -65,6 +66,10 @@ the ground.
 
 `Test/AnimationTest.tscn` attaches all of this automatically: pick an animation and the matching
 prop appears.
+
+**Police:** `Police_Radio` and `Police_Ticket` are made for the `PoliceMan_A`/`PoliceMan_B` models;
+the radio mic is placed on their chest (beside the badge) and may float or sink on other body
+shapes.
 
 **Cello:** there is deliberately no animation between carrying and playing. Cut from
 `Cello_Carry_*` to `Cello_Play`/`Cello_Rest` behind a visual transition (a puff, fade or similar),

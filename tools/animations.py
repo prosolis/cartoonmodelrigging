@@ -1227,8 +1227,141 @@ def cello_rest(ctx, frames):
     return pose
 
 
+# ---------------------------------------------------------------------------
+# Police (made for the PoliceMan models): talking into a shoulder radio
+# (Props/Radio_Mic.glb on "Torso") and writing a ticket (Props/TicketBook.glb
+# on "IteamSlot.L", Props/Pen.glb on "IteamSlot.R").
+
+# speaker mic clipped to the left chest by the shoulder seam (beside the badge), under the beard (rest pose, armature space)
+RADIO_MIC_AT_REST = V(0.205, -0.212, 1.025)
+RADIO_MIC_SIZE = V(0.06, 0.03, 0.08)
+
+
+def radio_mic_world(ctx, p):
+    local = ctx.rig.rest["Torso"].inverted() @ Matrix.Translation(RADIO_MIC_AT_REST)
+    return p.world("Torso") @ local
+
+
+def _key_radio(ctx, p, press):
+    """Left hand on the outer side of the mic, fingers up; press 1 = squeezing the key."""
+    m = radio_mic_world(ctx, p)
+    r = m.to_3x3()
+    off = 1.0 - press
+    palm = m @ V(RADIO_MIC_SIZE.x / 2 + PALM_SURFACE + 0.004 + 0.035 * off, -0.01 - 0.03 * off, -0.005 - 0.05 * off)
+    arm_to(p, "L", palm, r @ (UP + FWD * 0.25 + RIGHT * 0.15 * press), r @ (RIGHT + FWD * 0.15 * off),
+           r @ V(1, 0.5, -0.9))
+
+
+def police_radio(ctx, frames):
+    # talk (keyed) -> let go and listen -> key again and answer
+    press_keys = [(0.0, 1.0), (0.38, 1.0), (0.46, 0.0), (0.84, 0.0), (0.92, 1.0), (1.0, 1.0)]
+
+    def pose(fr):
+        ph = fr / frames
+        press = keyed(ph, press_keys)
+        talking = press * (0.5 + 0.5 * wave(ph * 9))  # little nods while speaking
+        p = ctx.stand()
+        hips_to(ctx, p, V(0, 0.005, ctx.hips_z - 0.004), roll=-1.5 + 1.0 * wave(ph))
+        breathe(p, ph * 2)
+        p.rotate("Torso", UP, 4 * press)
+        plant_feet(ctx, p)
+        relaxed_arms(ctx, p)
+        _hand_on_hip(p, "R")
+        _key_radio(ctx, p, press)
+        look(p, yaw=lerp(-6 + 10 * wave(ph * 2, 0.2), 24, press), pitch=lerp(-2, 13, press) + 3 * talking,
+             roll=lerp(0, -10, press))
+        return p
+    return pose
+
+
+# ticket book: long axis +Y, cover (pages) facing +Z, origin at its centre
+TICKET_BOOK_SIZE = V(0.16, 0.24, 0.026)
+PEN_TIP = 0.115  # pen tip distance from the fist centre (pen origin)
+
+
+def _hold_book(p, lift=0.0):
+    f, d = body_frame(p)
+    arm_to(p, "L", f(0.10, -0.43, 0.10 + lift), d(FWD + RIGHT * 0.25 + UP * 0.9), d(UP * 0.8 + BACK + RIGHT * 0.1),
+           d(V(0.8, 0.5, -1)), straight=True)
+    p.basis["Hand.L"] = Matrix.Identity(4)
+
+
+def _ref_book(ctx):
+    p = ctx.stand()
+    plant_feet(ctx, p)
+    relaxed_arms(ctx, p)
+    _hold_book(p)
+    return p
+
+
+def ticket_book_world(ctx, p):
+    """Book lying on the left palm, long axis along the fingers."""
+    w = p.world("Hand.L").to_3x3()
+    hx, hy, hz = (w.col[i].normalized() for i in range(3))
+    c = p.head("Hand.L") + hy * 0.13 - hx * (PALM_SURFACE + TICKET_BOOK_SIZE.z / 2 + 0.002)
+    m = Matrix((hz, hy, -hx)).transposed().to_4x4()
+    m.translation = c
+    return m
+
+
+def pen_world(ctx, p):
+    """Pen through the right fist, tip out of the little-finger side."""
+    w = p.world("Hand.R").to_3x3()
+    hx, hy, hz = (w.col[i].normalized() for i in range(3))
+    m = Matrix((-hy, hz, -hx)).transposed().to_4x4()
+    m.translation = _fist_centre(p)
+    return m
+
+
+def _write(ctx, p, u, v, lift):
+    """Put the pen tip at (u, v) on the open page (book coordinates), `lift` above it."""
+    bone, off = ctx.prop_offset("TicketBook")
+    book = p.world(bone) @ off
+    r = book.to_3x3()
+    bx, by, bz = (r.col[i].normalized() for i in range(3))
+    tip = book @ V(u, v, TICKET_BOOK_SIZE.z / 2 + 0.002 + lift)
+    # pen leaning back toward the writer's right shoulder
+    axis = (-bz + bx * -0.45 + by * -0.35).normalized()  # pen +Y points at the page
+    y = axis
+    z = (bx - y * bx.dot(y)).normalized()
+    m = Matrix((y.cross(z), y, z)).transposed().to_4x4()
+    m.translation = tip - y * PEN_TIP
+    hold_slot_prop(ctx, p, "R", "Pen", m, spin=True)
+
+
+def police_ticket(ctx, frames):
+    lines = 3
+    w0, w1 = 0.12, 0.88  # writing time span
+
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        hips_to(ctx, p, V(0, 0.0, ctx.hips_z - 0.006), roll=1.5 * wave(ph))
+        p.rotate("Torso", LEFT, 4)
+        breathe(p, ph * 2)
+        plant_feet(ctx, p)
+        relaxed_arms(ctx, p)
+        _hold_book(p, 0.006 * wave(ph * 2))
+        writing = ramp(ph, w0 - 0.06, w0) * (1 - ramp(ph, w1, w1 + 0.06))
+        t = clamp((ph - w0) / (w1 - w0)) * lines
+        line = min(int(t), lines - 1)
+        s = t - line
+        # across the line with a scribble, short lift between lines
+        u = lerp(-0.045, 0.05, s) if writing > 0 else 0.0
+        v = 0.065 - 0.05 * line + 0.007 * math.sin(s * math.pi * 14)
+        between = max(ramp(s, 0.9, 1.0), 1 - ramp(s, 0.0, 0.1)) if 0 < t < lines else 0.0
+        _write(ctx, p, u * writing + 0.02 * (1 - writing), v * writing - 0.07 * (1 - writing),
+               0.012 * between + 0.06 * (1 - writing))
+        # glance up at the car between writing
+        up = 1 - writing
+        look(p, yaw=-14 * up + 50 * u * writing, pitch=lerp(32, -4, up) + 1.5 * wave(ph * 6) * writing,
+             roll=-3 * up, torso_share=0.15)
+        return p
+    return pose
+
+
 # Poses used only as references for prop offsets
-REF_POSES = {"_ref_grip": _ref_grip}
+REF_POSES = {"_ref_grip": _ref_grip, "_ref_book": _ref_book}
 
 
 # Reference frames used to derive prop attachment offsets: name -> (bone, anim, frame, fn)
@@ -1239,6 +1372,9 @@ PROP_REFS = {
     "Box": ("Torso", "Carry_Box_Idle-loop", 0, box_world),
     "Umbrella": ("IteamSlot.R", "Umbrella_Idle-loop", 0, umbrella_world),
     "Phone": ("IteamSlot.R", "Phone_Idle-loop", 0, phone_world),
+    "Radio_Mic": ("Torso", "Police_Radio-loop", 0, radio_mic_world),
+    "TicketBook": ("IteamSlot.L", "_ref_book", 0, ticket_book_world),
+    "Pen": ("IteamSlot.R", "_ref_grip", 0, pen_world),
 }
 
 
@@ -1281,4 +1417,6 @@ ANIMATIONS = {
     "Cello_Carry_Walk-loop": (cello_carry_walk, 31, True),
     "Cello_Play-loop": (cello_play, 96, True),
     "Cello_Rest-loop": (cello_rest, 90, True),
+    "Police_Radio-loop": (police_radio, 120, True),
+    "Police_Ticket-loop": (police_ticket, 180, True),
 }

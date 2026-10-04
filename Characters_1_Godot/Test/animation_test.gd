@@ -25,6 +25,8 @@ const PROPS := {
 	"Cello_Carry": [["Props/Cello_Carried.glb", "IteamSlot.R"]],
 	"Cello_Play": [["Props/Cello_Played.glb", ""], ["Props/Bow.glb", "IteamSlot.R"], ["Props/Chair.glb", ""]],
 	"Cello_Rest": [["Props/Cello_Played.glb", ""], ["Props/Bow.glb", "IteamSlot.R"], ["Props/Chair.glb", ""]],
+	"Police_Radio": [["Props/Radio_Mic.glb", "Torso"]],
+	"Police_Ticket": [["Props/TicketBook.glb", "IteamSlot.L"], ["Props/Pen.glb", "IteamSlot.R"]],
 }
 
 var pack_dir := ""

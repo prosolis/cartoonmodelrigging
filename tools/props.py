@@ -1,6 +1,6 @@
 """Simple low-poly props that go with the new animations (runs inside bpy).
 
-Bone props (Box, Umbrella, Phone) are exported with their attachment offset
+Bone props (Box, Umbrella, Phone, Pen, ...) are exported with their attachment offset
 baked into the root node, in the bone's local space, so in Godot you add a
 BoneAttachment3D for the listed bone and instance the prop under it with an
 identity transform. The Bicycle is placed relative to the character root.
@@ -42,6 +42,8 @@ ANIM_PROPS = {
     "Cello_Carry_Walk-loop": ["Cello_Carried"],
     "Cello_Play-loop": ["Cello_Played", "Bow", "Chair"],
     "Cello_Rest-loop": ["Cello_Played", "Bow", "Chair"],
+    "Police_Radio-loop": ["Radio_Mic"],
+    "Police_Ticket-loop": ["TicketBook", "Pen"],
 }
 
 BIKE = {
@@ -305,6 +307,43 @@ def build_bow(root):
     box("Bow_Tip", (0.01, 0.015, 0.026), (0, 0.655, -0.012), stick, root)
 
 
+def build_radio_mic(root):
+    # local frame: armature axes (grille facing -Y, up +Z), origin at the mic centre
+    body = material("Radio_Body", (0.06, 0.06, 0.07, 1), 0.6)
+    grille = material("Radio_Grille", (0.22, 0.22, 0.24, 1), 0.5)
+    key = material("Radio_Key", (0.85, 0.35, 0.08, 1), 0.5)
+    box("Radio_Body", (0.06, 0.03, 0.08), (0, 0, 0), body, root)
+    for k in range(4):
+        box("Radio_Slot", (0.04, 0.004, 0.005), (0, -0.0155, 0.022 - k * 0.011), grille, root)
+    box("Radio_Key", (0.008, 0.016, 0.024), (0.032, 0, 0.008), key, root)
+    box("Radio_Clip", (0.03, 0.006, 0.05), (0, 0.017, 0.005), body, root)
+    # coiled cord running up over the shoulder
+    cylinder_between("Radio_Cord", (0, 0.004, 0.04), (0.02, 0.03, 0.09), 0.006, body, root, 6)
+    cylinder_between("Radio_Cord", (0.02, 0.03, 0.09), (0.03, 0.07, 0.11), 0.006, body, root, 6)
+
+
+def build_ticket_book(root):
+    # local frame: long axis +Y, open page facing +Z, origin at the centre (animations.TICKET_BOOK_SIZE)
+    cover = material("Ticket_Cover", (0.10, 0.16, 0.32, 1), 0.6)
+    paper = material("Ticket_Paper", (0.96, 0.95, 0.88, 1), 0.8)
+    ink = material("Ticket_Ink", (0.35, 0.40, 0.55, 1), 0.8)
+    box("Ticket_Cover", (0.16, 0.24, 0.013), (0, 0, -0.0065), cover, root)
+    box("Ticket_Pages", (0.15, 0.23, 0.013), (0, -0.002, 0.0065), paper, root)
+    box("Ticket_Header", (0.12, 0.025, 0.0015), (0, 0.09, 0.0135), cover, root)
+    for k in range(4):
+        box("Ticket_Line", (0.11, 0.003, 0.0012), (0, 0.055 - k * 0.04, 0.0135), ink, root)
+    cylinder_between("Ticket_Spine", (-0.08, 0.12, 0), (0.08, 0.12, 0), 0.009, cover, root, 8)
+
+
+def build_pen(root):
+    # local frame: +Y toward the tip, origin in the fist, tip at y = animations.PEN_TIP
+    barrel = material("Pen_Barrel", (0.05, 0.08, 0.25, 1), 0.4)
+    metal = material("Pen_Metal", (0.75, 0.75, 0.78, 1), 0.3, 1.0)
+    cylinder_between("Pen_Barrel", (0, -0.06, 0), (0, 0.10, 0), 0.007, barrel, root, 8)
+    cylinder_between("Pen_Tip", (0, 0.10, 0), (0, 0.115, 0), 0.0035, metal, root, 6)
+    cylinder_between("Pen_Clip", (0.008, -0.055, 0), (0.008, -0.02, 0), 0.002, metal, root, 4)
+
+
 BUILDERS = {
     "Box": build_box,
     "Umbrella": build_umbrella,
@@ -313,6 +352,9 @@ BUILDERS = {
     "Cello_Carried": lambda root: build_cello(root, endpin=False),
     "Cello_Played": build_cello,
     "Bow": build_bow,
+    "Radio_Mic": build_radio_mic,
+    "TicketBook": build_ticket_book,
+    "Pen": build_pen,
 }
 
 
@@ -381,7 +423,8 @@ def export_all():
     """Export every prop glb into Characters_1_Godot/Props/."""
     os.makedirs(PROPS_DIR, exist_ok=True)
     offsets = load_offsets()
-    for name in ["Box", "Umbrella", "Phone", "Bicycle", "Chair", "Cello_Carried", "Cello_Played", "Bow"]:
+    for name in ["Box", "Umbrella", "Phone", "Bicycle", "Chair", "Cello_Carried", "Cello_Played", "Bow",
+                 "Radio_Mic", "TicketBook", "Pen"]:
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o, do_unlink=True)
         root = build(name, animate=name == "Bicycle")

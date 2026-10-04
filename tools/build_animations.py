@@ -72,6 +72,7 @@ def main(argv):
 
     # prop attachment offsets, measured on the reference frames
     props.save_offsets({prop: ctx.prop_offset(prop) for prop in animations.PROP_REFS})
+    props.save_lines(animations.fishing_line_tracks(ctx))  # the fishing line follows the rod tip
     props.export_all()
 
 

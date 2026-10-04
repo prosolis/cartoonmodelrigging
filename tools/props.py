@@ -50,9 +50,17 @@ ANIM_PROPS = {
     "Taxi_Enter": ["Taxi"],
     "Taxi_Ride-loop": ["Taxi"],
     "Taxi_Exit": ["Taxi"],
+    "Surf_Paddle-loop": ["Surfboard"],
+    "Surf_Sit-loop": ["Surfboard"],
+    "Surf_Ride-loop": ["Surfboard"],
+    "Kite_Fly-loop": ["Kite"],
+    "Fish_Idle-loop": ["Rod", "Fishing_Line"],
+    "Fish_Cast": ["Rod", "Fishing_Line"],
+    "Canoe_Paddle-loop": ["Canoe"],
+    "Canoe_Rest-loop": ["Canoe"],
 }
 
-ANIMATED_PROPS = ("Bicycle", "Taxi")  # props with their own animation per clip
+ANIMATED_PROPS = ("Bicycle", "Taxi", "Surfboard", "Kite", "Fishing_Line", "Canoe")  # own animation per clip
 
 BIKE = {
     "crank": Vector((0, -0.10, 0.27)),
@@ -93,6 +101,22 @@ TAXI = {
 TAXI_HANDLE_OUT = Vector((0.67, 0.02, 1.106))    # the handle on the car's texture
 TAXI_GRIP_IN = Vector((0.24, -0.07, 1.12))       # inside, below the window (near the hinge)
 TAXI_FRAME_IN = Vector((0.72, -0.21, 1.30))      # rear edge of the window frame, inside (the glass leans in)
+
+
+# Water and beach props (see animations: Surfing, Kite, Fishing, Canoe)
+SURFBOARD = {"length": 2.0, "width": 0.56, "thick": 0.075}  # deck-top centre at the origin, nose toward -Y
+KITE_REEL = {  # winder: local X across (grips at the ends), line wound on the crossbars, top toward +Z
+    "grip": {"L": Vector((0.13, 0, 0)), "R": Vector((-0.13, 0, 0))},
+    "line_out": Vector((0, -0.02, 0.075)),
+    "bridle": Vector((0, 0.10, 0.30)),  # kite-local: where the line meets the kite (in front of its face)
+}
+ROD = {"length": 1.9, "butt": -0.32}  # along +Y from the fist; reel below (+Z)
+CANOE = {
+    "length": 3.4, "width": 0.72, "centre_y": -0.30,  # hull centre (the seat is at y = 0)
+    "bottom_z": -0.13, "floor_z": -0.09, "seat_z": -0.07, "gunwale_z": 0.15, "end_z": 0.30,
+    "paddle": 2.2,
+}
+LINES_JSON = os.path.join(os.path.dirname(__file__), "prop_lines.json")
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +428,260 @@ def build_pen(root):
     cylinder_between("Pen_Clip", (0.008, -0.055, 0), (0.008, -0.02, 0), 0.002, metal, root, 4)
 
 
+# ---------------------------------------------------------------------------
+# water and beach props
+
+
+def loft(name, sections, mat, parent=None, closed=True, cap=True, mats=None):
+    """Mesh through rings of points (each a list of Vectors, same count). closed: rings wrap around;
+    cap: fan the first and last ring shut. mats(face_centre) -> material index (optional)."""
+    import bmesh
+    me = bpy.data.meshes.new(name)
+    bm = bmesh.new()
+    rings = [[bm.verts.new(v) for v in ring] for ring in sections]
+    n = len(sections[0])
+    for a, b in zip(rings, rings[1:]):
+        for i in range(n if closed else n - 1):
+            j = (i + 1) % n
+            bm.faces.new((a[i], a[j], b[j], b[i]))
+    if cap:
+        for ring, rev in ((rings[0], False), (rings[-1], True)):
+            c = bm.verts.new(sum((v.co for v in ring), Vector()) / len(ring))
+            for i in range(n if closed else n - 1):
+                j = (i + 1) % n
+                vs = (c, ring[j], ring[i]) if rev else (c, ring[i], ring[j])
+                bm.faces.new(vs)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    if mats:
+        for f in bm.faces:
+            f.material_index = mats(f.calc_center_median())
+    bm.to_mesh(me)
+    bm.free()
+    o = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(o)
+    o.parent = parent
+    for m in mat if isinstance(mat, (list, tuple)) else [mat]:
+        me.materials.append(m)
+    return o
+
+
+def build_surfboard(root):
+    b = SURFBOARD
+    deck = material("Surf_Deck", (0.95, 0.93, 0.86, 1), 0.4)
+    stripe = material("Surf_Stripe", (0.10, 0.55, 0.75, 1), 0.4)
+    fl = empty("Surf_Float", root)
+    L, W, T = b["length"], b["width"], b["thick"]
+    secs = []
+    n = 24
+    for i in range(n + 1):
+        u = i / n  # 0 = nose (-Y) .. 1 = tail
+        y = -L / 2 + L * u
+        w = W / 2 * max(0.02, math.sin(math.pi * min(1.0, u * 1.08)) ** 0.55) * (1 - 0.25 * max(0.0, u - 0.8) / 0.2)
+        if u > 0.97:
+            w = max(w, W * 0.12)  # squash tail
+        t = T * (0.35 + 0.65 * math.sin(math.pi * u) ** 0.4)
+        rocker = 0.10 * (1 - u / 0.3) ** 2 if u < 0.3 else 0.02 * ((u - 0.75) / 0.25) ** 2 if u > 0.75 else 0.0
+        ring = []
+        for k in range(16):
+            a = 2 * math.pi * k / 16
+            c, s = math.cos(a), math.sin(a)
+            x = w * math.copysign(abs(c) ** 0.45, c)
+            z = (t / 2) * math.copysign(abs(s) ** 0.8, s)
+            ring.append(Vector((x, y, z - t / 2 + rocker)))
+        secs.append(ring)
+    loft("Surf_Board", secs, [deck, stripe], fl,
+         mats=lambda c: 1 if (abs(c.x) < 0.035 and c.z > -0.02 and abs(c.y) < L * 0.42) else 0)
+    # fin under the tail
+    box("Surf_Fin", (0.012, 0.12, 0.12), (0, L / 2 - 0.16, -T - 0.05), stripe, fl)
+    return {"Surf_Float": fl}
+
+
+def build_kite(root):
+    r = KITE_REEL
+    wood = material("Kite_Wood", (0.55, 0.38, 0.22, 1), 0.6)
+    string = material("Kite_String", (0.95, 0.95, 0.92, 1), 0.8)
+    sail_a = material("Kite_Sail_A", (0.90, 0.20, 0.15, 1), 0.6)
+    sail_b = material("Kite_Sail_B", (0.98, 0.80, 0.15, 1), 0.6)
+    tail = material("Kite_Tail", (0.15, 0.45, 0.85, 1), 0.6)
+    reel = empty("Kite_Reel", root)
+    for s in "LR":
+        g = r["grip"][s]
+        cylinder_between("Reel_Grip", g + Vector((0, 0, -0.09)), g + Vector((0, 0, 0.09)), 0.018, wood, reel)
+    for z in (-0.06, 0.06):
+        box("Reel_Bar", (0.25, 0.03, 0.025), (0, 0, z), wood, reel)
+    box("Reel_Line", (0.17, 0.04, 0.14), (0, 0, 0), string, reel)
+    body = empty("Kite_Body", root)
+    # diamond in its local XY plane (nose +Y), face toward +Z
+    nose, tail_pt, lw, rw = Vector((0, 0.55, 0)), Vector((0, -0.80, 0)), Vector((0.50, 0.12, 0)), Vector((-0.50, 0.12, 0))
+    for a, b, c, m in ((nose, lw, tail_pt, sail_a), (nose, tail_pt, rw, sail_b)):
+        me = bpy.data.meshes.new("Kite_Sail")
+        me.from_pydata([a, b, c], [], [(0, 1, 2)])
+        o = bpy.data.objects.new("Kite_Sail", me)
+        bpy.context.scene.collection.objects.link(o)
+        _finish(o, m, body)
+    cylinder_between("Kite_Spine", nose, tail_pt, 0.008, wood, body, 6)
+    cylinder_between("Kite_Spar", lw, rw, 0.008, wood, body, 6)
+    for k in (lw, rw, nose):
+        cylinder_between("Kite_Bridle", k * 0.6 + Vector((0, -0.05, 0)), r["bridle"], 0.003, string, body, 4)
+    prev = tail_pt
+    for i in range(1, 7):
+        pt = tail_pt + Vector((0.12 * math.sin(i * 1.3), -0.28 * i, -0.04 * i))
+        cylinder_between("Kite_TailString", prev, pt, 0.003, string, body, 4)
+        box("Kite_Bow", (0.12, 0.03, 0.004), pt, tail, body)
+        prev = pt
+    line = empty("Kite_Line", root)
+    cylinder_between("Kite_LineMesh", (0, 0, 0), (0, 1, 0), 0.0035, string, line, 4)
+    return {"Kite_Reel": reel, "Kite_Body": body, "Kite_Line": line}
+
+
+def build_rod(root):
+    # local frame: +Y along the rod from the fist (origin), reel below on +Z
+    cork = material("Rod_Cork", (0.72, 0.55, 0.36, 1), 0.8)
+    blank = material("Rod_Blank", (0.10, 0.18, 0.12, 1), 0.35)
+    metal = material("Rod_Metal", (0.70, 0.70, 0.74, 1), 0.3, 1.0)
+    dark = material("Rod_Reel", (0.12, 0.12, 0.14, 1), 0.5)
+    L, butt = ROD["length"], ROD["butt"]
+    cylinder_between("Rod_Grip", (0, butt, 0), (0, 0.12, 0), 0.017, cork, root, 8)
+    cylinder_between("Rod_Cap", (0, butt - 0.02, 0), (0, butt, 0), 0.02, dark, root, 8)
+    bpy.ops.mesh.primitive_cone_add(vertices=8, radius1=0.010, radius2=0.0025, depth=L - 0.12,
+                                    location=(0, 0.12 + (L - 0.12) / 2, 0), rotation=(-math.pi / 2, 0, 0))
+    c = bpy.context.active_object
+    c.name = "Rod_Blank"
+    _finish(c, blank, root)
+    for y in (0.55, 0.95, 1.3, 1.6, 1.86):
+        cylinder_between("Rod_Guide", (0, y, 0), (0, y, 0.025), 0.003, metal, root, 4)
+    cylinder_between("Reel_Stem", (0, 0.08, 0), (0, 0.08, 0.06), 0.006, metal, root, 6)
+    cylinder_between("Reel_Body", (0, 0.04, 0.08), (0, 0.11, 0.08), 0.035, dark, root, 12)
+    cylinder_between("Reel_Spool", (0, 0.11, 0.08), (0, 0.14, 0.08), 0.03, metal, root, 12)
+    cylinder_between("Reel_Crank", (0.035, 0.075, 0.08), (0.075, 0.075, 0.08), 0.004, metal, root, 4)
+    cylinder_between("Reel_Knob", (0.075, 0.075, 0.08), (0.075, 0.075, 0.11), 0.008, dark, root, 6)
+
+
+def build_fishing_line(root):
+    line_m = material("Fish_LineMat", (0.92, 0.92, 0.88, 1), 0.6)
+    red = material("Fish_FloatRed", (0.90, 0.10, 0.08, 1), 0.5)
+    white = material("Fish_FloatWhite", (0.97, 0.97, 0.95, 1), 0.5)
+    line = empty("Fish_Line", root)
+    cylinder_between("Fish_LineMesh", (0, 0, 0), (0, 1, 0), 0.0025, line_m, line, 4)
+    fl = empty("Fish_Float", root)
+    ellipsoid("Fish_FloatTop", (0.028, 0.028, 0.03), (0, 0, 0.02), red, fl)
+    ellipsoid("Fish_FloatBottom", (0.026, 0.026, 0.028), (0, 0, -0.012), white, fl)
+    cylinder_between("Fish_FloatStick", (0, 0, 0.04), (0, 0, 0.09), 0.004, red, fl, 4)
+    return {"Fish_Line": line, "Fish_Float": fl}
+
+
+def build_canoe(root):
+    c = CANOE
+    hull_m = material("Canoe_Hull", (0.85, 0.30, 0.10, 1), 0.5)
+    inside = material("Canoe_Inside", (0.22, 0.18, 0.15, 1), 0.8)
+    wood = material("Canoe_Wood", (0.55, 0.38, 0.22, 1), 0.6)
+    blade_m = material("Paddle_Blade", (0.95, 0.80, 0.15, 1), 0.5)
+    shaft_m = material("Paddle_Shaft", (0.15, 0.15, 0.17, 1), 0.4)
+    fl = empty("Canoe_Float", root)
+    L, W = c["length"], c["width"]
+    secs = []
+    n = 28
+    for i in range(n + 1):
+        u = i / n
+        y = c["centre_y"] - L / 2 + L * u
+        w = W / 2 * max(0.015, math.sin(math.pi * u) ** 0.6)
+        top = c["gunwale_z"] + (c["end_z"] - c["gunwale_z"]) * abs(2 * u - 1) ** 3
+        bottom = c["bottom_z"] + (top - c["bottom_z"]) * 0.9 * abs(2 * u - 1) ** 6
+        ring = []
+        for k in range(13):  # open U from the left gunwale under to the right
+            a = math.pi * k / 12
+            x = w * math.cos(a)
+            depth = math.sin(a) ** 0.6
+            ring.append(Vector((x, y, top - (top - bottom) * depth)))
+        secs.append(ring)
+    hull = loft("Canoe_Hull", secs, [hull_m, inside], fl, closed=False, cap=False)
+    sol = hull.modifiers.new("thickness", "SOLIDIFY")
+    sol.thickness = 0.018
+    sol.material_offset = 1
+    hull.data.polygons.foreach_set("use_smooth", [True] * len(hull.data.polygons))
+    # rim along the gunwales
+    for k in (0, 12):
+        pts = [secs[i][k] for i in range(n + 1)]
+        for a, b in zip(pts, pts[1:]):
+            cylinder_between("Canoe_Rim", a, b, 0.014, wood, fl, 6)
+    box("Canoe_Seat", (0.40, 0.42, 0.04), (0, 0.02, c["seat_z"] - 0.02), inside, fl)
+    box("Canoe_Back", (0.36, 0.04, 0.22), (0, 0.27, c["seat_z"] + 0.10), inside, fl, rot=(math.radians(-12), 0, 0))
+    box("Canoe_Floor", (0.30, 1.30, 0.02), (0, -0.25, c["floor_z"] - 0.01), inside, fl)
+    box("Canoe_Footrest", (0.42, 0.04, 0.06), (0, -0.56, c["floor_z"] + 0.04), wood, fl)
+    paddle = empty("Canoe_Paddle", root)
+    half = c["paddle"] / 2
+    cylinder_between("Paddle_Shaft", (0, -half + 0.3, 0), (0, half - 0.3, 0), 0.016, shaft_m, paddle, 8)
+    for sgn in (-1, 1):
+        box("Paddle_Blade", (0.012, 0.44, 0.16), (0, sgn * (half - 0.22), 0), blade_m, paddle)
+    return {"Canoe_Float": fl, "Canoe_Paddle": paddle}
+
+
+def load_lines():
+    if not os.path.exists(LINES_JSON):
+        return {}
+    with open(LINES_JSON) as f:
+        return json.load(f)
+
+
+def save_lines(data):
+    with open(LINES_JSON, "w") as f:
+        json.dump({k: [[[round(c, 5) for c in a], [round(c, 5) for c in b]] for a, b in v] for k, v in data.items()},
+                  f, separators=(",", ":"))
+
+
+def fishing_line_state(track):
+    data = load_lines()[track]
+
+    def state(f, frames):
+        import animations
+        tip, fl = (Vector(v) for v in data[min(f, len(data) - 1)])
+        m = Matrix.Translation(fl)
+        return {"Fish_Line": animations._line_matrix(tip, fl), "Fish_Float": m}
+    return state
+
+
+def prop_tracks(name):
+    """Per-clip tracks of the generic animated props: {track: (character anim, state(f, frames) -> {object: matrix})}."""
+    import animations
+    if name == "Surfboard":
+        return {t: (a, (lambda fn: lambda f, n: {"Surf_Float": fn(f, n)})(fn)) for t, (a, fn) in animations.SURF_TRACKS.items()}
+    if name == "Canoe":
+        return animations.CANOE_TRACKS
+    if name == "Kite":
+        return animations.KITE_TRACKS
+    if name == "Fishing_Line":
+        return {"Idle-loop": ("Fish_Idle-loop", fishing_line_state("Idle-loop")),
+                "Cast": ("Fish_Cast", fishing_line_state("Cast"))}
+    return {}
+
+
+def animate_objects(objs, frames, name, state):
+    """Key each object's full transform into an NLA track `name`: state(f, frames) -> {object name: matrix}."""
+    states = [state(f, frames) for f in range(frames + 1)]
+    for key, obj in objs.items():
+        obj.rotation_mode = "QUATERNION"
+        obj.animation_data_create()
+        act = bpy.data.actions.new(f"{name}_{key}")
+        act.id_root = "OBJECT"
+        obj.animation_data.action = act
+        prev = None
+        for f, st in enumerate(states):
+            loc, q, sc = st[key].decompose()
+            if prev is not None and q.dot(prev) < 0:
+                q = -q
+            prev = q
+            obj.location, obj.rotation_quaternion, obj.scale = loc, q, sc
+            for path in ("location", "rotation_quaternion", "scale"):
+                obj.keyframe_insert(path, frame=f)
+        for fc in act.fcurves:
+            for kp in fc.keyframe_points:
+                kp.interpolation = "LINEAR"
+        track = obj.animation_data.nla_tracks.new()
+        track.name = name
+        track.strips.new(name, 0, act)
+        obj.animation_data.action = None
+
+
 BUILDERS = {
     "Box": build_box,
     "Umbrella": build_umbrella,
@@ -415,7 +693,10 @@ BUILDERS = {
     "Radio_Mic": build_radio_mic,
     "TicketBook": build_ticket_book,
     "Pen": build_pen,
+    "Rod": build_rod,
 }
+TRACKED_BUILDERS = {"Surfboard": build_surfboard, "Kite": build_kite, "Fishing_Line": build_fishing_line,
+                    "Canoe": build_canoe}
 
 
 def load_offsets():
@@ -446,6 +727,12 @@ def build(name, animate=False):
             import animations
             for track, (anim, angle) in animations.TAXI_TRACKS.items():
                 animate_taxi(door, animations.ANIMATIONS[anim][1], track, angle)
+    elif name in TRACKED_BUILDERS:
+        objs = TRACKED_BUILDERS[name](root)
+        if animate:
+            import animations
+            for track, (anim, state) in prop_tracks(name).items():
+                animate_objects(objs, animations.ANIMATIONS[anim][1], track, state)
     else:
         BUILDERS[name](root)
     return root
@@ -460,7 +747,12 @@ def attach_for_animation(anim, char_arm):
         root = build(name, animate=name in ANIMATED_PROPS)
         if name in ANIMATED_PROPS:
             # follow the scene timeline in the preview
-            want = animations.bike_track_for(anim) if name == "Bicycle" else animations.taxi_track_for(anim)
+            if name == "Bicycle":
+                want = animations.bike_track_for(anim)
+            elif name == "Taxi":
+                want = animations.taxi_track_for(anim)
+            else:
+                want = next(t for t, (a, _) in prop_tracks(name).items() if a == anim)
             for o in [root] + list(root.children_recursive):
                 if o.animation_data and o.animation_data.nla_tracks:
                     tracks = list(o.animation_data.nla_tracks)
@@ -490,7 +782,7 @@ def export_all():
     os.makedirs(PROPS_DIR, exist_ok=True)
     offsets = load_offsets()
     for name in ["Box", "Umbrella", "Phone", "Bicycle", "Chair", "Cello_Carried", "Cello_Played", "Bow",
-                 "Radio_Mic", "TicketBook", "Pen", "Taxi"]:
+                 "Radio_Mic", "TicketBook", "Pen", "Taxi", "Surfboard", "Kite", "Rod", "Fishing_Line", "Canoe"]:
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o, do_unlink=True)
         root = build(name, animate=name in ANIMATED_PROPS)

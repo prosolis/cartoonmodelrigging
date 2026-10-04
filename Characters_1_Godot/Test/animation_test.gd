@@ -5,7 +5,7 @@ extends Node3D
 
 const CROWD_SIZE := 12
 const Hats := preload("../Props/santa_hat.gd")
-# Character animation -> animation of its root prop (Bicycle.glb, Taxi.glb) to play with it
+# Character animation -> animation of its root prop (Bicycle, Taxi, Surfboard, Kite, Fishing_Line, Canoe) to play with it
 const PROP_ANIMS := {
 	"Cycling": "Pedal",
 	"Cycling_Coast": "Coast",
@@ -19,6 +19,15 @@ const PROP_ANIMS := {
 	"Taxi_Enter": "Enter",
 	"Taxi_Ride": "Ride",
 	"Taxi_Exit": "Exit",
+	# board, kite, fishing line, canoe and paddle
+	"Surf_Paddle": "Paddle",
+	"Surf_Sit": "Sit",
+	"Surf_Ride": "Ride",
+	"Kite_Fly": "Fly",
+	"Fish_Idle": "Idle",
+	"Fish_Cast": "Cast",
+	"Canoe_Paddle": "Paddle",
+	"Canoe_Rest": "Rest",
 }
 
 # Props for some of the added animations: animation name prefix -> list of [prop scene, bone].
@@ -37,6 +46,10 @@ const PROPS := {
 	"Taxi_Enter": [["Props/Taxi.glb", ""]],
 	"Taxi_Ride": [["Props/Taxi.glb", ""]],
 	"Taxi_Exit": [["Props/Taxi.glb", ""]],
+	"Surf_": [["Props/Surfboard.glb", ""]],
+	"Kite_Fly": [["Props/Kite.glb", ""]],
+	"Fish_": [["Props/Rod.glb", "IteamSlot.R"], ["Props/Fishing_Line.glb", ""]],
+	"Canoe_": [["Props/Canoe.glb", ""]],
 }
 
 var pack_dir := ""
@@ -247,7 +260,7 @@ func _attach_prop(scene: PackedScene, bone: String, i: int, anim: String) -> voi
 		# root prop: the placement is baked into the scene
 		ch.add_child(prop)
 		props.append(prop)
-		# the bicycle and the taxi have their own animation per clip (wheels, crank, lean; the door): play it in sync
+		# animated root props have their own animation per clip (wheels, door, board, kite, line, paddle): play it in sync
 		var prop_ap := prop.find_child("AnimationPlayer", true, false) as AnimationPlayer
 		var prop_anim: String = PROP_ANIMS.get(anim, "Pedal")
 		if prop_ap and prop_ap.has_animation(prop_anim):

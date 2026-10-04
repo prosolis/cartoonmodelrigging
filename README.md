@@ -3,7 +3,7 @@
 `Characters_1_Godot/` is the Characters_1 pack for Godot 4 (308 characters sharing one
 21-bone skeleton). The original zip is kept as `Characters_1_Godot.zip`.
 
-This repo adds **52 new animations** to the pack's shared animation library, plus a few
+This repo adds **60 new animations** to the pack's shared animation library, plus a few
 props that go with them. All 47 original animations are untouched.
 
 ![New animations](Characters_1_Godot/Preview_NewAnimations.png)
@@ -29,6 +29,10 @@ that suffix on import (`Wave_B-loop` shows up as `Wave_B`).
 | Cello | `Cello_Carry_Idle`, `Cello_Carry_Walk` (holding it by the neck), `Cello_Play` (seated, bowing), `Cello_Rest` (seated, bow down, swaying) | carrying: `Props/Cello_Carried.glb` on `IteamSlot.R`; playing: `Props/Cello_Played.glb` + `Props/Chair.glb` at the root, `Props/Bow.glb` on `IteamSlot.R` |
 | Police | `Police_Radio` (keys the shoulder mic, talks, lets go to listen), `Police_Ticket` (writes a ticket, glancing up at the car) | `Props/Radio_Mic.glb` on `Torso`; `Props/TicketBook.glb` on `IteamSlot.L` + `Props/Pen.glb` on `IteamSlot.R` |
 | Taxi | `Taxi_Hail` (arm up, watching the traffic), `Taxi_Enter`, `Taxi_Ride` (seated loop), `Taxi_Exit` | `Props/Taxi.glb` at the character root (enter/ride/exit) |
+| Surfing | `Surf_Paddle` (lying on the board, paddling), `Surf_Sit` (astride the board, legs in the water, looking back for a wave), `Surf_Ride` (standing, carving one way then the other) | `Props/Surfboard.glb` at the character root |
+| Kite | `Kite_Fly` (winder in both hands, small tugs, looking up at the kite) | `Props/Kite.glb` at the character root |
+| Fishing | `Fish_Idle` (holding the rod, the odd twitch), `Fish_Cast` (back over the shoulder and out) | `Props/Rod.glb` on `IteamSlot.R` + `Props/Fishing_Line.glb` at the root |
+| Canoe | `Canoe_Paddle` (a stroke on one side, then the other), `Canoe_Rest` (paddle across the knees, looking around) | `Props/Canoe.glb` at the character root (canoe and paddle) |
 | Walks | `Walk_Brisk`, `Walk_Stroll`, `Walk_Tired`, `Walk_Happy`, `Walk_Sightseeing` (looking up at the buildings) | |
 | Extras | `Talk`, `Clap`, `Cheer`, `Point_A`, `Nod_Yes`, `Shake_No`, `Shrug`, `Dance_A`, `Wait_HandsBehind` | |
 
@@ -57,7 +61,7 @@ skeleton.add_child(att)                    # the character's Armature/Skeleton3D
 att.add_child(preload("res://Characters_1_Godot/Props/Umbrella.glb").instantiate())
 ```
 
-Root props (`Bicycle`, `Chair`, `Cello_Played`) are added as children of the character root
+Root props (`Bicycle`, `Chair`, `Cello_Played`, `Taxi`, `Surfboard`, `Kite`, `Fishing_Line`, `Canoe`) are added as children of the character root
 with an identity transform; their placement is baked in too.
 
 The bicycle is a child of the character root (not a bone). Its own `AnimationPlayer` has one
@@ -100,6 +104,32 @@ the character's clip:
 they chain through `Taxi_Ride`. To drive off, reparent the character to the taxi after
 `Taxi_Enter` (or hide it). Very tall hair or hats (Character_B, the police caps) may brush the
 roof while seated. `tools/taxi.py` does the fitting; change `TAXI_SCALE` or the door outline there.
+
+**Water and beach:** the surfboard, kite, fishing line and canoe are root props with their own
+`AnimationPlayer`, like the bicycle: play the animation named below together with the character's
+clip (same length).
+
+| Character | Prop | Prop animation | |
+|---|---|---|---|
+| `Surf_Paddle` | `Surfboard` | `Paddle` | 1.33 s loop |
+| `Surf_Sit` | `Surfboard` | `Sit` | 5 s loop: the board rocks on the swell, nose up |
+| `Surf_Ride` | `Surfboard` | `Ride` | 3 s loop: the board rolls into each turn |
+| `Kite_Fly` | `Kite` | `Fly` | 4 s loop: the winder in the hands, the line and the kite (about 10 m up and out in front) |
+| `Fish_Idle` | `Fishing_Line` | `Idle` | 5 s loop |
+| `Fish_Cast` | `Fishing_Line` | `Cast` | 3.2 s: starts and ends on the `Fish_Idle` pose |
+| `Canoe_Paddle` | `Canoe` | `Paddle` | 1.87 s loop: the canoe rocks with the strokes; the paddle is part of the prop |
+| `Canoe_Rest` | `Canoe` | `Rest` | 5 s loop |
+
+- For the surf and canoe clips the character root is on the **water surface**: the legs (sitting
+  on the board), the paddle blades and the bottom of the canoe go below it. Put your water plane
+  at the root's height. The board and canoe point along the character's facing direction, so move
+  the root forward for the ride. In `Surf_Ride` the body stands across the board (left foot
+  forward), chest toward the character's right, head turned to the nose.
+- Fishing is set up for standing at the end of a jetty: the float lands 4.6 m out and 0.7 m
+  below the feet (`FISH_FLOAT` in `tools/animations.py`). The line goes from the rod tip to the
+  float; the rod (`Rod.glb` on `IteamSlot.R`) can also be used on its own.
+- The bodies vary a lot, so a big belly may touch the board deck and slim characters lie a little
+  above it in `Surf_Paddle`; sitting astride, the thighs rest on the rails.
 
 **Cello:** there is deliberately no animation between carrying and playing. Cut from
 `Cello_Carry_*` to `Cello_Play`/`Cello_Rest` behind a visual transition (a puff, fade or similar),
@@ -175,5 +205,6 @@ python3.11 -m venv .venv && .venv/bin/pip install bpy==4.2.* numpy pillow
 - `tools/props.py`: prop geometry and export
 - `tools/merge_glb.py`: appends animations to the library without touching the originals
 - `tools/check_clearance.py`: umbrella / cello neck vs head clearance check across characters
+- `tools/prop_lines.json`: rod tip and float positions per frame for the fishing line (written by the build)
 - `tools/taxi.py`: fits the PixelClock taxi (scale, door cut-out, windows, cabin)
 - `tools/santa_hat.py`: Santa hat model, per-model fitting (`OVERRIDES` for hand tweaks, skip list)

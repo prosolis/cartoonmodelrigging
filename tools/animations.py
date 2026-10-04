@@ -1960,6 +1960,538 @@ def walk_variant(name):
     return build
 
 
+# ---------------------------------------------------------------------------
+# Water and beach. The surf and canoe clips put the character root on the water
+# surface (z = 0); their board / canoe is a root prop that floats (bobs, rolls,
+# carves) with its own animation per clip, and the rider follows it rigidly:
+# the pose is built in the float's frame and the whole body is then moved with
+# it (_on_float). The kite (reel, line, kite) is a root prop too; the fishing
+# rod goes on "IteamSlot.R" and its line is a root prop keyed from the rod tip
+# (props.LINE_TRACKS, written by the build).
+
+
+def _float_matrix(z=0.0, pitch=0.0, roll=0.0, yaw=0.0, pivot=V(0, 0, 0)):
+    """Float frame: rotate about `pivot` (pitch + = nose (-Y) down, roll + = to the character's right), lift by z."""
+    r = (rot(UP, yaw) @ rot(FWD, roll) @ rot(LEFT, pitch)).to_matrix().to_4x4()
+    return Matrix.Translation(Vector(pivot) + V(0, 0, z)) @ r @ Matrix.Translation(-Vector(pivot))
+
+
+def _on_float(p, m):
+    """Move the whole body rigidly with a float whose frame is m (the pose was built in float space)."""
+    p.set_world("Hips", m @ p.world("Hips"))
+
+
+def _foot_q(toes, sole_up=False):
+    """World rotation for a foot whose toes point along `toes`; sole_up turns it over (lying face down)."""
+    t = Vector(toes).normalized()
+    up = UP if not sole_up else DOWN
+    side = FWD.cross(UP)  # rest foot: toes FWD, top UP
+    x = t.cross(up)
+    if x.length < 1e-6:
+        x = side
+    x.normalize()
+    z = x.cross(t).normalized()
+    return Matrix((x, t, z)).transposed().to_quaternion() @ Matrix((side, FWD, UP)).transposed().to_quaternion().inverted()
+
+
+# --- Surfing ---------------------------------------------------------------
+# Surfboard model: deck-top centre at the origin, nose toward -Y (props.SURFBOARD).
+
+SURF_PADDLE_FRAMES, SURF_SIT_FRAMES, SURF_RIDE_FRAMES = 40, 150, 90
+SURF_PRONE_HIPS = V(0, 0.36, 0.31)   # lying on the board: hips (board space)
+SURF_SIT_HIPS = V(0, 0.42, 0.07)     # sitting astride, toward the tail
+SURF_RIDE = {"front": -0.27, "back": 0.25, "hips_z": 0.31}  # stance along the board, crouched hip height
+
+
+def surf_board_paddle(f, frames):
+    ph = f / frames
+    return _float_matrix(z=0.03 + 0.008 * wave(ph * 2), roll=1.5 * math.sin(2 * math.pi * ph), pitch=0.6 * wave(ph * 2, 0.2))
+
+
+def surf_board_sit(f, frames):
+    ph = f / frames
+    swell = math.sin(2 * math.pi * ph)
+    return _float_matrix(z=0.005 + 0.03 * swell, pitch=-4 + 2.0 * math.sin(2 * math.pi * ph - 0.8),
+                         roll=1.5 * math.sin(4 * math.pi * ph + 0.5), pivot=SURF_SIT_HIPS)
+
+
+def _carve(f, frames):
+    return math.sin(2 * math.pi * f / frames)  # one turn each way per loop
+
+
+def surf_board_ride(f, frames):
+    c = _carve(f, frames)
+    c2 = math.sin(2 * math.pi * f / frames - 0.5)
+    # roll toward the toe side (the character's facing side, root -X) and back
+    return _float_matrix(z=0.03, roll=-9 * c, pitch=-2 + 1.5 * c2, yaw=-10 * c2)
+
+
+SURF_TRACKS = {
+    "Paddle-loop": ("Surf_Paddle-loop", surf_board_paddle),
+    "Sit-loop": ("Surf_Sit-loop", surf_board_sit),
+    "Ride-loop": ("Surf_Ride-loop", surf_board_ride),
+}
+
+
+def _paddle_hand(t, sh, sx):
+    """Crawl stroke for one arm. t: stroke phase (0 = hand enters the water ahead). Returns palm, fingers, palm normal."""
+    if t < 0.55:  # pull: in ahead, down under the board edge, back to the hip
+        k = t / 0.55
+        y = lerp(sh.y - 0.42, sh.y + 0.30, smooth(k))
+        z = -0.06 - 0.22 * math.sin(math.pi * k)
+        x = sh.x + sx * (0.10 + 0.05 * math.sin(math.pi * k))
+        return V(x, y, z), DOWN + FWD * (0.6 - 1.2 * k), BACK + DOWN * 0.3
+    k = (t - 0.55) / 0.45  # recovery: elbow up, hand forward over the water
+    y = lerp(sh.y + 0.30, sh.y - 0.42, smooth(k))
+    z = -0.06 + 0.20 * math.sin(math.pi * k)
+    x = sh.x + sx * (0.16 + 0.06 * math.sin(math.pi * k))
+    return V(x, y, z), FWD + DOWN * 0.4, DOWN + LEFT * sx * 0.4
+
+
+def _prone(ctx, p, kick=0.0):
+    """Lying face down on the board, chest up, looking ahead (board space)."""
+    hips_to(ctx, p, SURF_PRONE_HIPS, pitch=90)
+    p.rotate("Torso", LEFT, -8)  # chest up off the board
+    p.rotate("Head", LEFT, -54)   # look ahead
+    for s in "LR":
+        sx = SIDE[s]
+        k = kick * (1 if s == "L" else -1)
+        ankle = V(0.14 * sx, SURF_PRONE_HIPS.y + 0.44, 0.16 + 0.03 * k)
+        p.leg_ik(s, ankle, V(0.2 * sx, 0.3, -1))
+        p.rest_orient(f"Foot.{s}", _foot_q(BACK + DOWN * 0.15, sole_up=True))
+        p.basis[f"Toes.{s}"] = Matrix.Identity(4)
+
+
+def surf_paddle(ctx, frames):
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        _prone(ctx, p, kick=math.sin(4 * math.pi * ph))
+        p.rotate("Torso", UP, 6 * math.sin(2 * math.pi * ph))  # shoulders roll with the strokes
+        for s, off in (("L", 0.0), ("R", 0.5)):
+            sx = SIDE[s]
+            sh = p.head(f"Arm.{s}")
+            palm, fingers, pn = _paddle_hand((ph + off) % 1.0, sh, sx)
+            arm_to(p, s, palm, fingers, pn, V(sx, 0.2, 1.0))
+        look(p, yaw=4 * math.sin(2 * math.pi * ph))
+        _on_float(p, surf_board_paddle(fr, frames))
+        return p
+    return pose
+
+
+def surf_sit(ctx, frames):
+    """Sitting astride the board, legs in the water, watching the horizon and looking back for a wave."""
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        board = surf_board_sit(fr, frames)
+        board_pitch = math.degrees(math.asin(clamp((board.to_3x3() @ FWD).z, -1, 1)))  # + = nose up
+        hips_to(ctx, p, SURF_SIT_HIPS, pitch=-2 + board_pitch)  # stay upright as the board rocks
+        p.rotate("Torso", LEFT, 6)
+        breathe(p, ph * 4)
+        for s in "LR":
+            sx = SIDE[s]
+            a = 2 * math.pi * (ph * 3 + (0.0 if s == "L" else 0.5))  # slow sculling circles
+            ankle = V(0.38 * sx + 0.03 * math.cos(a), SURF_SIT_HIPS.y - 0.06 + 0.05 * math.sin(a), -0.33)
+            p.leg_ik(s, ankle, V(0.6 * sx, -1, 0.2))
+            p.foot_flat(s, rot(UP, 10 * sx) @ FWD, pitch=45)
+        # look out to sea, then over the right shoulder for the next set, then ahead again
+        back = math.sin(math.pi * ramp(ph, 0.45, 0.78))
+        p.rotate("Torso", UP, -28 * back)
+        for s in "LR":
+            sx = SIDE[s]
+            hip, knee = p.head(f"UpperLeg.{s}"), p.head(f"Leg.{s}")
+            palm = hip.lerp(knee, 0.55) + V(0, 0, 0.08)
+            arm_to(p, s, palm, FWD + DOWN * 0.3 + RIGHT * sx * 0.2, DOWN + RIGHT * sx * 0.3, V(0.8 * sx, 1, 0))
+        look(p, yaw=14 * wave(ph * 2) * (1 - back) - 62 * back, pitch=-4 + 2 * wave(ph * 3))
+        _on_float(p, board)
+        return p
+    return pose
+
+
+def surf_ride(ctx, frames):
+    """Standing on the board (left foot forward), crouched, arms out, carving one way then the other.
+
+    The board stays pointing along the character's -Y (the direction of travel);
+    the body stands across it, chest toward root -X, head turned to the nose."""
+    def pose(fr):
+        ph = fr / frames
+        c = _carve(fr, frames)
+        p = ctx.stand()
+        z = SURF_RIDE["hips_z"] - 0.035 * (0.5 + 0.5 * c * c) + 0.01 * wave(ph * 4)
+        hips_to(ctx, p, V(0.02 * c, (SURF_RIDE["front"] + SURF_RIDE["back"]) / 2, z), yaw=-90, pitch=14)
+        p.rotate("Torso", LEFT, 8)  # (the hips are turned: LEFT is now across the board)
+        p.rotate("Torso", UP, 26)   # shoulders open toward the nose
+        for s, y, toe in (("L", SURF_RIDE["front"], 24), ("R", SURF_RIDE["back"], -6)):
+            ankle = V(0.0, y, 0.081)
+            fwd = rot(UP, -90 + toe) @ FWD
+            knee = rot(UP, -90) @ V(0.0, -1, 0) + V(0, 0.35 * (-1 if s == "L" else 1), 0)
+            p.leg_ik(s, ankle, knee)
+            p.foot_flat(s, fwd)
+        # arms out for balance: front arm toward the nose, back arm low behind
+        sh_l, sh_r = p.head("Arm.L"), p.head("Arm.R")
+        arm_to(p, "L", sh_l + V(-0.08 + 0.05 * c, -0.50, -0.20 + 0.06 * c), FWD + DOWN * 0.2, DOWN, V(0.3, 0.2, -1))
+        arm_to(p, "R", sh_r + V(-0.12 - 0.05 * c, 0.42, -0.34 - 0.05 * c), BACK + DOWN * 0.4, DOWN + LEFT * 0.3,
+               V(-0.2, 0.3, -1))
+        look(p, yaw=50, pitch=8 - 4 * c)
+        _on_float(p, surf_board_ride(fr, frames))
+        return p
+    return pose
+
+
+# --- Kite ------------------------------------------------------------------
+# Props/Kite.glb at the character root: a two-handled winder in front of the
+# chest (both hands on its grips), the line, and a diamond kite high in front.
+from props import KITE_REEL  # noqa: E402
+
+KITE_FRAMES = 120
+KITE_AT = V(-1.2, -7.5, 8.0)   # kite position (root space) between tugs
+TUGS = [(0.10, 1.0), (0.42, 0.6), (0.70, 1.0)]  # (clip phase, strength)
+
+
+def _tug(ph):
+    """0..1 pull: snaps in over 4 frames, eases back over ~18."""
+    v = 0.0
+    for t0, k in TUGS:
+        d = (ph - t0) % 1.0 * KITE_FRAMES
+        if d < 4:
+            v = max(v, k * smooth(d / 4))
+        elif d < 22:
+            v = max(v, k * (1 - smooth((d - 4) / 18)))
+    return v
+
+
+def _tug_lift(ph):
+    """The kite climbs a little after each tug and settles back."""
+    v = 0.0
+    for t0, k in TUGS:
+        d = (ph - t0) % 1.0 * KITE_FRAMES
+        v += k * math.sin(math.pi * clamp(d / 40)) if d < 40 else 0.0
+    return v
+
+
+def kite_reel_matrix(f, frames):
+    ph = f / frames
+    t = _tug(ph)
+    c = V(0.01 * wave(ph * 2), -0.36 + 0.07 * t, 0.90 - 0.06 * t + 0.008 * wave(ph * 3))
+    m = rot(LEFT, -18 - 10 * t).to_matrix().to_4x4()  # top tipped toward the kite
+    m.translation = c
+    return m
+
+
+def kite_matrix(f, frames):
+    """Kite: its face toward the flyer, nose up, swaying in a slow figure of eight."""
+    ph = f / frames
+    lift = _tug_lift(ph)
+    pos = KITE_AT + V(1.1 * math.sin(2 * math.pi * ph), 0.2 * lift, 0.5 * math.sin(4 * math.pi * ph) + 0.45 * lift)
+    to_flyer = (V(0, 0, 1.0) - pos).normalized()
+    y = (UP - to_flyer * UP.dot(to_flyer)).normalized()
+    y = rot(to_flyer, -14 * math.cos(2 * math.pi * ph)) @ y  # bank into the sway
+    x = y.cross(to_flyer).normalized()
+    m = Matrix((x, y, to_flyer)).transposed().to_4x4()
+    m.translation = pos
+    return m
+
+
+def kite_state(f, frames):
+    reel = kite_reel_matrix(f, frames)
+    kite = kite_matrix(f, frames)
+    return {"Kite_Reel": reel, "Kite_Body": kite,
+            "Kite_Line": _line_matrix(reel @ KITE_REEL["line_out"], kite @ KITE_REEL["bridle"])}
+
+
+def _line_matrix(a, b):
+    """A unit line along +Y, from a to b (scaled along Y)."""
+    d = b - a
+    y = d.normalized()
+    x = y.orthogonal().normalized()
+    z = x.cross(y)
+    m = Matrix((x * 1.0, y * d.length, z)).transposed().to_4x4()
+    m.translation = a
+    return m
+
+
+KITE_TRACKS = {"Fly-loop": ("Kite_Fly-loop", kite_state)}
+
+
+def kite_fly(ctx, frames):
+    def pose(fr):
+        ph = fr / frames
+        t = _tug(ph)
+        p = ctx.stand()
+        hips_to(ctx, p, V(0, 0.02 + 0.015 * t, ctx.hips_z - 0.01 - 0.012 * t), roll=1.2 * wave(ph * 2))
+        p.rotate("Torso", LEFT, -6 - 5 * t)  # leaning back against the pull, more on a tug
+        breathe(p, ph * 3)
+        ankles = {s: ctx.ankle[s] + V(0.03 * SIDE[s], -0.02, 0) for s in "LR"}
+        plant_feet(ctx, p, ankles, knee_out=0.3)
+        reel = kite_reel_matrix(fr, frames)
+        for s in "LR":
+            sx = SIDE[s]
+            grip = reel @ KITE_REEL["grip"][s]
+            inward = reel.to_3x3() @ V(-sx, 0, 0)
+            palm = grip - inward * 0.035 + reel.to_3x3() @ V(0, 0.02, 0)
+            arm_to(p, s, palm, reel.to_3x3() @ V(0, -1, 0), inward, V(0.9 * sx, 0.3, -0.7))
+        kite = kite_matrix(fr, frames).translation
+        to = kite - p.head("Head")
+        yaw = math.degrees(math.atan2(-to.x, -to.y))
+        pitch = -math.degrees(math.atan2(to.z, to.xy.length))
+        look(p, yaw=yaw * 0.8, pitch=max(-40.0, pitch * 0.75), torso_share=0.15)
+        return p
+    return pose
+
+
+# --- Fishing ---------------------------------------------------------------
+# Props/Rod.glb on "IteamSlot.R" (rod along +Y from the fist, reel below it);
+# Props/Fishing_Line.glb at the root, keyed per clip from the rod tip to the
+# float (props.LINE_TRACKS). Standing at the end of a jetty: the water is
+# FISH_WATER_Z below the feet and the float lands FISH_FLOAT ahead.
+from props import ROD  # noqa: E402
+
+FISH_IDLE_FRAMES, FISH_CAST_FRAMES = 150, 96
+FISH_WATER_Z = -0.7
+FISH_FLOAT = V(-0.45, -4.6, FISH_WATER_Z)
+ROD_ANGLE = 60.0  # rod angle up from the forearm, toward the thumb
+
+
+def rod_world(ctx, p):
+    """Rod in the fist (reference pose: fist ahead, thumb up): tipped ROD_ANGLE up from the forearm, reel below."""
+    fy = p.axis("ForeArm.R", 1)
+    a = math.radians(ROD_ANGLE)
+    y = (fy * math.cos(a) + UP * math.sin(a)).normalized()
+    z = (DOWN - y * DOWN.dot(y)).normalized()
+    m = Matrix((y.cross(z), y, z)).transposed().to_4x4()
+    m.translation = _fist_centre(p)
+    return m
+
+
+def rod_matrix(ctx, p):
+    bone, off = ctx.prop_offset("Rod")
+    return p.world(bone) @ off
+
+
+# right fist keys (torso-relative position, forearm direction, palm normal)
+FISH_HOLD = (V(-0.19, -0.36, -0.02), FWD + UP * 0.10, LEFT + UP * 0.1)
+FISH_CAST_KEYS = [
+    # frame, fist, forearm direction, palm normal
+    (0, *FISH_HOLD),
+    (12, V(-0.20, -0.32, 0.12), FWD + UP * 0.8, LEFT + UP * 0.1),        # lift: line comes in
+    (34, V(-0.36, -0.10, 0.34), UP + BACK * 0.9 + RIGHT * 0.25, LEFT),   # back cast over the right shoulder
+    (44, V(-0.36, -0.08, 0.36), UP + BACK * 1.1 + RIGHT * 0.25, LEFT),   # pause: the float swings behind
+    (53, V(-0.24, -0.36, 0.24), FWD + UP * 0.9, LEFT + UP * 0.1),        # forward: release
+    (60, V(-0.20, -0.42, 0.10), FWD + UP * 0.25, LEFT + UP * 0.1),       # follow through, rod pointing out
+    (80, *FISH_HOLD),
+    (96, *FISH_HOLD),
+]
+FISH_RELEASE, FISH_LAND = 53, 76
+
+
+def _fish_stance(ctx, p, ph, sway=1.0):
+    hips_to(ctx, p, V(0, 0, ctx.hips_z - 0.01), yaw=-6, roll=sway * 1.0 * wave(ph))
+    p.rotate("Torso", LEFT, 4)
+    breathe(p, ph * 4)
+    ankles = {"L": ctx.ankle["L"] + V(0.01, -0.06, 0), "R": ctx.ankle["R"] + V(-0.02, 0.05, 0)}
+    plant_feet(ctx, p, ankles)
+    relaxed_arms(ctx, p)
+
+
+def _hold_rod(ctx, p, fist, fore, palm, jig=0.0):
+    f, d = body_frame(p)
+    fore = rot(d(LEFT), -jig) @ d(fore)
+    arm_to(p, "R", f(*fist), fore, d(palm), d(V(-0.7, 0.4, -1)), straight=True)
+    p.basis["Hand.R"] = Matrix.Identity(4)
+    # left hand on the butt of the rod, below and behind the right
+    m = rod_matrix(ctx, p)
+    rx, ry, rz = (m.to_3x3().col[i].normalized() for i in range(3))
+    butt = m @ V(0, ROD["butt"] + 0.05, 0)
+    arm_to(p, "L", butt + rz * 0.03, rx + rz * 0.3, -rz, V(0.6, 0.3, -1))
+
+
+def fish_idle(ctx, frames):
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        _fish_stance(ctx, p, ph)
+        # a small twitch of the rod tip now and then
+        jig = 0.0
+        for t0 in (0.30, 0.36, 0.78):
+            jig += 7 * math.sin(math.pi * clamp((ph - t0) * frames / 6))
+        _hold_rod(ctx, p, *FISH_HOLD, jig=jig)
+        look(p, yaw=-4 + 18 * wave(ph, 0.6) * ramp(ph, 0.5, 0.6) * (1 - ramp(ph, 0.9, 1.0)), pitch=10)
+        return p
+    return pose
+
+
+def fish_cast(ctx, frames):
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        _fish_stance(ctx, p, 0.0, sway=0.0)
+        keys = FISH_CAST_KEYS
+        fist = keyed(fr, [(k[0], k[1]) for k in keys])
+        fore = keyed(fr, [(k[0], k[2].normalized()) for k in keys])
+        palm = keyed(fr, [(k[0], k[3].normalized()) for k in keys])
+        wind = math.sin(math.pi * ramp(fr, 10, 50))
+        p.rotate("Torso", UP, -16 * wind + 8 * math.sin(math.pi * ramp(fr, 46, 70)))
+        p.rotate("Torso", LEFT, -5 * wind + 6 * math.sin(math.pi * ramp(fr, 48, 66)))
+        _hold_rod(ctx, p, fist, fore, palm)
+        watch = ramp(fr, 50, 70)
+        look(p, yaw=-4 - 30 * math.sin(math.pi * ramp(fr, 20, 48)) * (1 - watch), pitch=10 * watch - 6 * wind)
+        return p
+    return pose
+
+
+def fishing_line_tracks(ctx):
+    """Rod tip and float per frame for Fish_Idle and Fish_Cast (root space): {track: [(tip, float), ...]}."""
+    out = {}
+    for anim, track in (("Fish_Idle-loop", "Idle-loop"), ("Fish_Cast", "Cast")):
+        builder, frames, _ = ANIMATIONS[anim]
+        fn = builder(ctx, frames)
+        tips = [rod_matrix(ctx, fn(f)) @ V(0, ROD["length"], 0) for f in range(frames + 1)]
+        floats = []
+        if anim == "Fish_Idle-loop":
+            for f in range(frames + 1):
+                ph = f / frames
+                floats.append(FISH_FLOAT + V(0, 0, 0.012 * wave(ph * 5) - 0.02 * max(0.0, wave(ph * 2, 0.3)) ** 8))
+        else:
+            # reeled in during the lift, swings on a short line through the cast, then flies out to FISH_FLOAT
+            hang = 0.45
+            pos = vel = None
+            g = V(0, 0, -9.8 / 30 ** 2)
+            for f, tip in enumerate(tips):
+                if f <= 12:
+                    k = smooth(f / 12)
+                    b = FISH_FLOAT.lerp(tip + V(0, 0, -hang), k) + V(0, 0, 0.6 * math.sin(math.pi * k))
+                    if f == 12:
+                        pos, vel = b.copy(), V(0, 0, 0)
+                elif f <= FISH_RELEASE:
+                    new = pos + vel * 0.96 + g  # pendulum on a short line from the tip
+                    d = new - tip
+                    new = tip + d.normalized() * hang
+                    vel, pos = new - pos, new
+                    b = pos.copy()
+                elif f <= FISH_LAND:
+                    k = (f - FISH_RELEASE) / (FISH_LAND - FISH_RELEASE)
+                    a = pos.lerp(FISH_FLOAT, k)
+                    b = a + V(0, 0, 1.6 * math.sin(math.pi * k) * (1 - 0.3 * k))
+                else:
+                    k = (f - FISH_LAND) / (frames - FISH_LAND)
+                    b = FISH_FLOAT + V(0, 0, -0.05 * math.sin(math.pi * min(1.0, k * 3)) * (1 - k))
+                floats.append(b)
+        out[track] = [(list(t), list(b)) for t, b in zip(tips, floats)]
+    return out
+
+
+# --- Canoe -----------------------------------------------------------------
+# Props/Canoe.glb at the character root: the canoe (floating, rocking with the
+# strokes) and the double-bladed paddle, keyed per clip; the hands hold the
+# paddle. Canoe space: waterline centre under the seat, bow toward -Y.
+from props import CANOE  # noqa: E402
+
+CANOE_PADDLE_FRAMES, CANOE_REST_FRAMES = 56, 150
+CANOE_HIPS = V(0, 0.04, CANOE["seat_z"] + 0.03)
+
+
+def _stroke(ph):
+    """Paddle shaft yaw/elevation over one cycle: right stroke, switch, left stroke, switch."""
+    keys_a = [(0.0, 34.0), (0.38, -22.0), (0.50, -34.0), (0.88, 22.0), (1.0, 34.0)]
+    keys_e = [(0.0, 38.0), (0.36, 38.0), (0.50, -38.0), (0.86, -38.0), (1.0, 38.0)]
+    return keyed(ph, keys_a), keyed(ph, keys_e)
+
+
+def canoe_paddle_matrix(yaw, elev, centre, roll=0.0):
+    """Paddle frame: +Y along the shaft toward the left blade, blade faces along local X (roll turns the blades)."""
+    d = rot(UP, yaw) @ (rot(BACK, -elev) @ LEFT)  # elev + = left end up
+    x = rot(d, roll) @ (BACK - d * BACK.dot(d)).normalized()
+    m = Matrix((x, d, x.cross(d))).transposed().to_4x4()
+    m.translation = centre
+    return m
+
+
+def _canoe_float(ph, strokes=1.0):
+    s = math.sin(4 * math.pi * ph)
+    return _float_matrix(z=0.006 * math.cos(4 * math.pi * ph) * strokes + 0.01 * wave(ph * 2) * (1 - strokes),
+                         roll=1.8 * s * strokes + 1.2 * wave(ph * 2) * (1 - strokes), yaw=1.5 * s * strokes,
+                         pivot=CANOE_HIPS)
+
+
+def canoe_paddle_state(f, frames):
+    ph = f / frames
+    yaw, elev = _stroke(ph)
+    pull = math.sin(math.pi * ((ph % 0.5) / 0.5))
+    centre = CANOE_HIPS + V(0, -0.34 - 0.05 * pull, 0.50 - 0.03 * pull)
+    m = _canoe_float(ph)
+    return {"Canoe_Float": m, "Canoe_Paddle": m @ canoe_paddle_matrix(yaw, elev, centre)}
+
+
+CANOE_REST_PADDLE = (0.0, 0.0, CANOE_HIPS + V(0, -0.27, 0.26), 90.0)  # blades flat
+
+
+def canoe_rest_state(f, frames):
+    m = _canoe_float(f / frames, strokes=0.0)
+    return {"Canoe_Float": m, "Canoe_Paddle": m @ canoe_paddle_matrix(*CANOE_REST_PADDLE)}
+
+
+CANOE_TRACKS = {
+    "Paddle-loop": ("Canoe_Paddle-loop", canoe_paddle_state),
+    "Rest-loop": ("Canoe_Rest-loop", canoe_rest_state),
+}
+
+
+def _canoe_seated(ctx, p, lean=0.0):
+    hips_to(ctx, p, CANOE_HIPS, pitch=-8 + lean)
+    p.rotate("Torso", LEFT, 10 + lean)
+    p.rotate("Head", LEFT, -6 - lean)
+    for s in "LR":
+        sx = SIDE[s]
+        ankle = V(0.12 * sx, CANOE_HIPS.y - 0.47, CANOE["floor_z"] + 0.10)
+        p.leg_ik(s, ankle, V(0.5 * sx, -0.5, 1.0))
+        p.foot_flat(s, rot(UP, 10 * sx) @ FWD, pitch=-28)
+
+
+def _grip_paddle(p, pm, sep=0.30):
+    """Both hands on the shaft (overhand), `sep` either side of the paddle centre."""
+    px, py, pz = (pm.to_3x3().col[i].normalized() for i in range(3))
+    for s, k in (("R", -1), ("L", 1)):
+        sx = SIDE[s]
+        grip = pm.translation + py * (sep * k)
+        top = pz if pz.z > 0 else -pz  # hand on top of the shaft
+        back = px if px.y > 0 else -px
+        arm_to(p, s, grip + top * 0.035 + back * 0.01, -back + DOWN * 0.3, -top, V(0.9 * sx, 0.4, -0.6))
+
+
+def canoe_paddle(ctx, frames):
+    def pose(fr):
+        ph = fr / frames
+        yaw, elev = _stroke(ph)
+        p = ctx.stand()
+        _canoe_seated(ctx, p, lean=4)
+        p.rotate("Torso", UP, yaw * 0.55)   # wind up: shoulders turn with the shaft
+        p.rotate("Torso", FWD, -elev * 0.10)
+        st = canoe_paddle_state(fr, frames)
+        m = st["Canoe_Float"]
+        _grip_paddle(p, m.inverted() @ st["Canoe_Paddle"])  # built in canoe space
+        look(p, yaw=-yaw * 0.4, pitch=-2)
+        _on_float(p, m)
+        return p
+    return pose
+
+
+def canoe_rest(ctx, frames):
+    """Coasting: paddle across the knees, looking around."""
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        _canoe_seated(ctx, p, lean=0)
+        breathe(p, ph * 4)
+        st = canoe_rest_state(fr, frames)
+        m = st["Canoe_Float"]
+        _grip_paddle(p, m.inverted() @ st["Canoe_Paddle"], sep=0.22)
+        look(p, yaw=34 * wave(ph), pitch=-4 + 4 * wave(ph * 2, 0.3), torso_share=0.2)
+        _on_float(p, m)
+        return p
+    return pose
+
+
 # Poses used only as references for prop offsets
 REF_POSES = {"_ref_grip": _ref_grip, "_ref_book": _ref_book}
 
@@ -1975,6 +2507,7 @@ PROP_REFS = {
     "Radio_Mic": ("Torso", "Police_Radio-loop", 0, radio_mic_world),
     "TicketBook": ("IteamSlot.L", "_ref_book", 0, ticket_book_world),
     "Pen": ("IteamSlot.R", "_ref_grip", 0, pen_world),
+    "Rod": ("IteamSlot.R", "_ref_grip", 0, rod_world),
 }
 
 
@@ -2026,5 +2559,13 @@ ANIMATIONS = {
     "Taxi_Enter": (taxi_enter, TAXI_ENTER_FRAMES, False),
     "Taxi_Ride-loop": (taxi_ride, 120, True),
     "Taxi_Exit": (taxi_exit, TAXI_EXIT_FRAMES, False),
+    "Surf_Paddle-loop": (surf_paddle, SURF_PADDLE_FRAMES, True),
+    "Surf_Sit-loop": (surf_sit, SURF_SIT_FRAMES, True),
+    "Surf_Ride-loop": (surf_ride, SURF_RIDE_FRAMES, True),
+    "Kite_Fly-loop": (kite_fly, KITE_FRAMES, True),
+    "Fish_Idle-loop": (fish_idle, FISH_IDLE_FRAMES, True),
+    "Fish_Cast": (fish_cast, FISH_CAST_FRAMES, False),
+    "Canoe_Paddle-loop": (canoe_paddle, CANOE_PADDLE_FRAMES, True),
+    "Canoe_Rest-loop": (canoe_rest, CANOE_REST_FRAMES, True),
     **{name: (walk_variant(name), w["cycle"] * w["cycles"], True) for name, w in WALKS.items()},
 }

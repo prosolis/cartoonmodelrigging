@@ -72,6 +72,12 @@ from it.
   for a typical head width, so on the two widest heads (Character_3 and Character_4) it can
   overlap the hair a little.
 
+## Model fixes
+
+- `Character_2_2_5` and `Character_2_2_11` shipped with their head and hair skinned 50/50 to the
+  Hips and Head bones, so the head lagged behind in every animation. Their skin weights now match
+  `Character_2_2_1` (same mesh): fully on Head. Nothing else in those files changed.
+
 ## Santa hats
 
 ![Santa hats](Characters_1_Godot/Preview_SantaHats.png)
@@ -98,9 +104,6 @@ the tip's springiness (`tip_stiffness`, `tip_drag`, `tip_gravity`) are static va
 - **Umbrella:** the umbrella goes through the hat, so hide the hat while an `Umbrella_*` clip
   plays: `SantaHat.set_hidden(character, SantaHat.clashes_with(anim))`. The test scene does this.
 - The test scene has a **Santa hats** switch.
-- `Character_2_2_5` and `Character_2_2_11` came with their head skinned half to the hips, so their
-  head lags behind the Head bone (with or without a hat). The hat follows the bone, so on those two
-  it can drift off the head in big moves.
 
 ## Regenerating / tweaking
 

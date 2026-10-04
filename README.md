@@ -3,7 +3,7 @@
 `Characters_1_Godot/` is the Characters_1 pack for Godot 4 (308 characters sharing one
 21-bone skeleton). The original zip is kept as `Characters_1_Godot.zip`.
 
-This repo adds **31 new animations** to the pack's shared animation library, plus a few
+This repo adds **35 new animations** to the pack's shared animation library, plus a few
 props that go with them. All 47 original animations are untouched.
 
 ![New animations](Characters_1_Godot/Preview_NewAnimations.png)
@@ -26,6 +26,7 @@ that suffix on import (`Wave_B-loop` shows up as `Wave_B`).
 | Hot | `Fan_Hot` (fanning the face, hand on hip) | |
 | Cold | `Shiver_Cold` (hunched, shaking, rubbing hands) | |
 | Cycling | `Cycling` (pedalling), `Cycling_Coast` | `Props/Bicycle.glb` at the character root |
+| Cello | `Cello_Carry_Idle`, `Cello_Carry_Walk` (holding it by the neck), `Cello_Play` (seated, bowing), `Cello_Rest` (seated, bow down, swaying) | carrying: `Props/Cello_Carried.glb` on `IteamSlot.R`; playing: `Props/Cello_Played.glb` + `Props/Chair.glb` at the root, `Props/Bow.glb` on `IteamSlot.R` |
 | Extras | `Talk`, `Clap`, `Cheer`, `Point_A`, `Nod_Yes`, `Shake_No`, `Shrug`, `Dance_A`, `Wait_HandsBehind` | |
 
 The walking variants are built on the pack's `Walk_C` cycle (1.03 s, in place), so they line up
@@ -42,6 +43,9 @@ skeleton.add_child(att)                    # the character's Armature/Skeleton3D
 att.add_child(preload("res://Characters_1_Godot/Props/Umbrella.glb").instantiate())
 ```
 
+Root props (`Bicycle`, `Chair`, `Cello_Played`) are added as children of the character root
+with an identity transform; their placement is baked in too.
+
 The bicycle is a child of the character root (not a bone). Its own `AnimationPlayer` has
 `Pedal` (0.8 s, matches `Cycling`) and `Coast` (2 s, matches `Cycling_Coast`). Start it together
 with the rider so the cranks line up with the feet.
@@ -49,14 +53,21 @@ with the rider so the cranks line up with the feet.
 `Test/AnimationTest.tscn` attaches all of this automatically: pick an animation and the matching
 prop appears.
 
+**Cello:** there is deliberately no animation between carrying and playing. Cut from
+`Cello_Carry_*` to `Cello_Play`/`Cello_Rest` behind a visual transition (a puff, fade or similar),
+swapping `Cello_Carried.glb` for `Cello_Played.glb` + `Bow.glb` + a chair at the same moment. The
+played cello stands at a fixed spot in front of the seated character, so it lines up with the chair
+pose (and `Props/Chair.glb`) as long as the character's root stays put.
+
 **Chair:** sitting moves the hips back about 0.17 from the character's root, and the seat surface
 is at a height of about 0.27. Put the character's root at the front edge of the chair, facing away
 from it.
 
 **Notes / limits**
 - The hands are mittens and the rig has no finger or face bones, so the poses are stylised.
-- Props sit at a placement that clears the heads of all characters (the umbrella shaft passes at
-  least 6 cm from every head; checked with `tools/check_clearance.py`). The phone at the ear is set
+- Props sit at a placement that clears the heads of all characters (the umbrella shaft and cello
+  neck pass at least 6 cm from every head; checked with `tools/check_clearance.py`). Because the
+  heads are big, the played cello leans further left than a real one would. The phone at the ear is set
   for a typical head width, so on the two widest heads (Character_3 and Character_4) it can
   overlap the hair a little.
 
@@ -75,4 +86,4 @@ python3.11 -m venv .venv && .venv/bin/pip install bpy==4.2.* numpy pillow
 - `tools/rigkit.py`: posing helpers (FK, two-bone IK, keyframe baking)
 - `tools/props.py`: prop geometry and export
 - `tools/merge_glb.py`: appends animations to the library without touching the originals
-- `tools/check_clearance.py`: umbrella-vs-head clearance check across characters
+- `tools/check_clearance.py`: umbrella / cello neck vs head clearance check across characters

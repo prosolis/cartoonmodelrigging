@@ -38,8 +38,14 @@ class Ctx:
         """(bone, matrix) attachment offset of a prop, measured on its reference frame."""
         if name not in self._offsets:
             bone, anim, frame, fn = PROP_REFS[name]
-            builder, frames, _ = ANIMATIONS[anim]
-            p = builder(self, frames)(frame)
+            if bone is None:  # placed relative to the character root
+                self._offsets[name] = (None, fn(self, None))
+                return self._offsets[name]
+            if anim in REF_POSES:
+                p = REF_POSES[anim](self)
+            else:
+                builder, frames, _ = ANIMATIONS[anim]
+                p = builder(self, frames)(frame)
             self._offsets[name] = (bone, p.world(bone).inverted() @ fn(self, p))
         return self._offsets[name]
 
@@ -216,8 +222,8 @@ def wave_once(ctx, frames):
 CHAIR_HIPS = V(0, 0.17, 0.215)
 
 
-def _sit_chair(ctx, p, s, lean_extra=0.0):
-    """s: 0 standing .. 1 seated."""
+def _sit_chair(ctx, p, s, lean_extra=0.0, spread=0.0):
+    """s: 0 standing .. 1 seated. spread widens the knees (e.g. to hold a cello)."""
     stand = V(0, 0, ctx.hips_z)
     # hips path: go down/back with a slight forward bulge so it reads as weight shifting
     pos = stand.lerp(CHAIR_HIPS, smooth(s))
@@ -226,8 +232,8 @@ def _sit_chair(ctx, p, s, lean_extra=0.0):
     hips_to(ctx, p, pos, pitch=lean * 0.5)
     p.rotate("Torso", LEFT, lean * 0.5)
     p.rotate("Head", LEFT, -lean * 0.6)
-    ankles = {k: ctx.ankle[k] + V(0.0, -0.06 * s, 0) for k in "LR"}
-    plant_feet(ctx, p, ankles, knee_out=0.2)
+    ankles = {k: ctx.ankle[k] + V(spread * SIDE[k], -0.06 * s, 0) for k in "LR"}
+    plant_feet(ctx, p, ankles, knee_out=0.2 + spread * 6, feet_yaw=8 + spread * 120)
 
 
 def _hands_on_thighs(p, ph=0.0):
@@ -431,31 +437,60 @@ def phone_walk(ctx, frames):
     return pose
 
 
-def hold_slot_prop(ctx, p, side, prop, desired, slide):
+def hold_slot_prop(ctx, p, side, prop, desired, slide=None, spin=False):
     """Pose an arm so a slot-attached prop lands exactly at `desired` (world matrix).
 
-    The forearm orientation follows from the prop; the prop is slid along
-    `slide` until the upper arm can reach the elbow. The wrist is kept straight
-    so the prop stays flat against the palm.
+    The forearm orientation follows from the prop. To let the upper arm reach
+    the elbow either the prop is slid along `slide`, or (spin=True, for
+    round props like a bow) rolled about its own Y axis, picking the lowest
+    elbow. The wrist is kept straight so the prop stays in the palm.
     """
     s = side.upper()
     rig = ctx.rig
     bone, off = ctx.prop_offset(prop)
     slot_rel = rig.offset[bone]  # slot relative to forearm (slot basis is identity)
-    fore0 = desired @ off.inverted() @ slot_rel.inverted()
     sh = p.head(f"Arm.{s}")
     l1 = (rig.rest[f"ForeArm.{s}"].translation - rig.rest[f"Arm.{s}"].translation).length
-    e0 = fore0.translation
-    u = Vector(slide).normalized()
-    dv = e0 - sh
-    bq, cq = 2 * dv.dot(u), dv.length_squared - l1 * l1
-    disc = bq * bq - 4 * cq
-    if disc >= 0:
-        r1, r2 = (-bq - math.sqrt(disc)) / 2, (-bq + math.sqrt(disc)) / 2
-        lam = r1 if abs(r1) < abs(r2) else r2
+    lam = 0.0
+    if spin:
+        def fore_at(phi):
+            return desired @ Matrix.Rotation(phi, 4, "Y") @ off.inverted() @ slot_rel.inverted()
+
+        def err(phi):
+            return (fore_at(phi).translation - sh).length - l1
+
+        steps = 72
+        phis = [2 * math.pi * i / steps for i in range(steps + 1)]
+        errs = [err(a) for a in phis]
+        roots = []
+        for a0, a1, e0_, e1_ in zip(phis, phis[1:], errs, errs[1:]):
+            if e0_ == 0 or e0_ * e1_ < 0:
+                lo, hi = a0, a1
+                for _ in range(30):
+                    mid = (lo + hi) / 2
+                    if err(lo) * err(mid) <= 0:
+                        hi = mid
+                    else:
+                        lo = mid
+                roots.append((lo + hi) / 2)
+        if roots:
+            phi = min(roots, key=lambda a: fore_at(a).translation.z)
+        else:
+            phi = min(phis, key=lambda a: abs(err(a)))
+        fore = fore_at(phi)
     else:
-        lam = -bq / 2  # closest approach
-    fore = Matrix.Translation(u * lam) @ fore0
+        fore0 = desired @ off.inverted() @ slot_rel.inverted()
+        e0 = fore0.translation
+        u = Vector(slide).normalized()
+        dv = e0 - sh
+        bq, cq = 2 * dv.dot(u), dv.length_squared - l1 * l1
+        disc = bq * bq - 4 * cq
+        if disc >= 0:
+            r1, r2 = (-bq - math.sqrt(disc)) / 2, (-bq + math.sqrt(disc)) / 2
+            lam = r1 if abs(r1) < abs(r2) else r2
+        else:
+            lam = -bq / 2  # closest approach
+        fore = Matrix.Translation(u * lam) @ fore0
     elbow = fore.translation
     wrist = elbow + fore.to_3x3().col[1].normalized() * rig.length[f"ForeArm.{s}"]
     tip = elbow - (sh + wrist) * 0.5
@@ -921,8 +956,168 @@ def wait_hands_behind(ctx, frames):
     return pose
 
 
+# ---------------------------------------------------------------------------
+# Cello: carried by the neck (Props/Cello_Carried.glb on "IteamSlot.R") and
+# played seated (Props/Cello_Played.glb at the character root, Props/Bow.glb on
+# "IteamSlot.R", Props/Chair.glb at the root). There is no transition clip:
+# cut between carrying and playing with a visual effect.
+#
+# Cello model space: +Y up the instrument, origin where the endpin leaves the
+# body (endpin goes to y=-0.15), strings on the +Z side, width along X.
+
+CELLO_GRIP_Y = 0.70          # where the carrying hand holds the neck
+CELLO_STRINGS_Z = 0.075      # string height above the body centre plane
+CELLO_CARRY = {"x": -0.27, "y": -0.46, "z": 0.21}
+CELLO_PLAY_ENDPIN = V(0.08, -0.40, 0.0)
+CELLO_PLAY_AXIS = V(0.37, 0.06, 1.0)  # leans left (clear of the big heads), slightly back
+
+
+def cello_play_matrix(ctx=None, p=None):
+    u = CELLO_PLAY_AXIS.normalized()
+    z = FWD - u * FWD.dot(u)
+    z.normalize()
+    m = Matrix((u.cross(z), u, z)).transposed().to_4x4()
+    m.translation = CELLO_PLAY_ENDPIN + u * 0.15
+    return m
+
+
+def _fist_centre(p, side="R"):
+    s = side.upper()
+    w = p.world(f"Hand.{s}").to_3x3()
+    palm_sign = 1 if s == "R" else -1
+    return p.head(f"Hand.{s}") + w.col[1].normalized() * p.hand_grip_offset(s) + w.col[0].normalized() * 0.02 * palm_sign
+
+
+def _carry_cello_arm(p, bob=0.0):
+    f, d = body_frame(p)
+    palm = f(CELLO_CARRY["x"], CELLO_CARRY["y"], CELLO_CARRY["z"] + bob)
+    arm_to(p, "R", palm, d(FWD + LEFT * 0.2 + UP * 0.25), d(LEFT + UP * 0.15), d(V(-0.45, 0.5, -1)), straight=True)
+    p.basis["Hand.R"] = Matrix.Identity(4)
+
+
+def cello_carry_world(ctx, p):
+    """Reference: cello upright, front facing forward, neck through the right fist."""
+    y, z = UP, FWD
+    m = Matrix((y.cross(z), y, z)).transposed().to_4x4()
+    m.translation = _fist_centre(p) - y * CELLO_GRIP_Y
+    return m
+
+
+def cello_carry_idle(ctx, frames):
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        breathe(p, ph * 2)
+        p.rotate("Torso", LEFT, -3)
+        p.rotate("Torso", UP, -5)
+        plant_feet(ctx, p)
+        relaxed_arms(ctx, p)
+        p.rotate("Arm.L", BACK, -6)
+        _carry_cello_arm(p, 0.004 * wave(ph * 2))
+        look(p, yaw=10 * wave(ph), pitch=-2 + 2 * wave(ph, 0.3))
+        return p
+    return pose
+
+
+def cello_carry_walk(ctx, frames):
+    def pose(fr):
+        p = ctx.walk(fr)
+        p.rotate("Torso", LEFT, -3)
+        _carry_cello_arm(p)
+        return p
+    return pose
+
+
+def _ref_grip(ctx):
+    """Reference pose for the bow grip: straight wrist, fist in front of the body."""
+    p = ctx.stand()
+    plant_feet(ctx, p)
+    relaxed_arms(ctx, p)
+    f, d = body_frame(p)
+    arm_to(p, "R", f(-0.20, -0.35, 0.15), d(FWD), d(LEFT), d(V(-0.4, 0.5, -1)), straight=True)
+    p.basis["Hand.R"] = Matrix.Identity(4)
+    return p
+
+
+def bow_world(ctx, p):
+    """Bow stick through the fist along the thumb direction, frog at the fist."""
+    w = p.world("Hand.R").to_3x3()
+    hx, hy, hz = (w.col[i].normalized() for i in range(3))
+    m = Matrix((-hy, -hz, hx)).transposed().to_4x4()
+    m.translation = _fist_centre(p)
+    return m
+
+
+def _cello_seated(ctx, p, ph, sway=1.0):
+    _sit_chair(ctx, p, 1.0, lean_extra=10, spread=0.08)
+    p.rotate("Torso", FWD, -2.5 * sway * wave(ph))
+    p.rotate("Torso", UP, 4)
+    breathe(p, ph * 3)
+    look(p, yaw=10, pitch=10 + 3 * sway * wave(ph * 2), roll=-9 - 3 * sway * wave(ph))
+    cm = cello_play_matrix()
+    cx, cy, cz = (cm.to_3x3().col[i].normalized() for i in range(3))
+    return cm, cx, cy, cz
+
+
+def _cello_left_hand(p, cm, cx, cy, cz, ph, shifts=True):
+    pos_y = 0.76 + (0.06 * smooth(0.5 + 0.5 * wave(ph * 2, 0.15)) if shifts else 0.0)
+    vib = 0.006 * wave(ph * 24)
+    neck = cm @ V(0, pos_y + vib, 0.02)
+    palm = neck + cx * 0.07 - cz * 0.01
+    arm_to(p, "L", palm, cz + RIGHT * 0.6, -cx + cz * 0.2, cx + DOWN * 0.4 + BACK * 0.3)
+
+
+def cello_play(ctx, frames):
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        cm, cx, cy, cz = _cello_seated(ctx, p, ph)
+        _cello_left_hand(p, cm, cx, cy, cz, ph)
+        # bow: two long strokes per loop, eased at the turnarounds
+        stroke = 0.5 - 0.5 * math.cos(2 * math.pi * 2 * ph)
+        s = 0.12 + 0.44 * stroke
+        string_tilt = 6 * wave(ph, 0.2)
+        d = (rot(cz, string_tilt) @ cx).normalized()
+        contact = cm @ V(0, 0.40, CELLO_STRINGS_Z)
+        origin = contact - d * s + cz * 0.022
+        z = cz - d * cz.dot(d)
+        z.normalize()
+        m = Matrix((d.cross(z), d, z)).transposed().to_4x4()
+        m.translation = origin
+        hold_slot_prop(ctx, p, "R", "Bow", m, spin=True)
+        return p
+    return pose
+
+
+def cello_rest(ctx, frames):
+    """Seated with the cello, bow resting on the right knee, swaying to the music."""
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        cm, cx, cy, cz = _cello_seated(ctx, p, ph, sway=1.4)
+        _cello_left_hand(p, cm, cx, cy, cz, ph, shifts=False)
+        # bow held at the frog just above the right knee, tip down toward the floor
+        knee = p.head("Leg.R")
+        frog = knee + V(-0.04, 0.02, 0.16)
+        d = (FWD * 0.45 + DOWN + RIGHT * 0.25).normalized()
+        z = FWD - d * FWD.dot(d)
+        z.normalize()
+        m = Matrix((d.cross(z), d, z)).transposed().to_4x4()
+        m.translation = frog
+        hold_slot_prop(ctx, p, "R", "Bow", m, spin=True)
+        return p
+    return pose
+
+
+# Poses used only as references for prop offsets
+REF_POSES = {"_ref_grip": _ref_grip}
+
+
 # Reference frames used to derive prop attachment offsets: name -> (bone, anim, frame, fn)
 PROP_REFS = {
+    "Cello_Carried": ("IteamSlot.R", "Cello_Carry_Idle-loop", 0, cello_carry_world),
+    "Cello_Played": (None, None, 0, cello_play_matrix),
+    "Bow": ("IteamSlot.R", "_ref_grip", 0, bow_world),
     "Box": ("Torso", "Carry_Box_Idle-loop", 0, box_world),
     "Umbrella": ("IteamSlot.R", "Umbrella_Idle-loop", 0, umbrella_world),
     "Phone": ("IteamSlot.R", "Phone_Idle-loop", 0, phone_world),
@@ -961,4 +1156,8 @@ ANIMATIONS = {
     "Shrug": (shrug, 40, False),
     "Dance_A-loop": (dance, 32, True),
     "Wait_HandsBehind-loop": (wait_hands_behind, 120, True),
+    "Cello_Carry_Idle-loop": (cello_carry_idle, 90, True),
+    "Cello_Carry_Walk-loop": (cello_carry_walk, 31, True),
+    "Cello_Play-loop": (cello_play, 96, True),
+    "Cello_Rest-loop": (cello_rest, 90, True),
 }

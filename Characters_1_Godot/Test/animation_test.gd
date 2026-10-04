@@ -12,6 +12,9 @@ const BIKE_ANIMS := {
 	"Cycling_Stop": "Stop",
 	"Cycling_Rest": "Rest",
 	"Cycling_Start": "Start",
+	"Cycling_Signal_Left": "Coast",
+	"Cycling_Signal_Right": "Coast",
+	"Cycling_Signal_Stop": "Coast",
 }
 
 # Props for some of the added animations: animation name prefix -> list of [prop scene, bone].

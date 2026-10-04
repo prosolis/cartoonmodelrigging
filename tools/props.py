@@ -34,6 +34,9 @@ ANIM_PROPS = {
     "Cycling_Stop": ["Bicycle"],
     "Cycling_Rest-loop": ["Bicycle"],
     "Cycling_Start": ["Bicycle"],
+    "Cycling_Signal_Left": ["Bicycle"],
+    "Cycling_Signal_Right": ["Bicycle"],
+    "Cycling_Signal_Stop": ["Bicycle"],
     "Sit_Chair_Idle-loop": ["Chair"],
     "Sit_Chair_Down": ["Chair"],
     "Sit_Chair_StandUp": ["Chair"],
@@ -44,7 +47,12 @@ ANIM_PROPS = {
     "Cello_Rest-loop": ["Cello_Played", "Bow", "Chair"],
     "Police_Radio-loop": ["Radio_Mic"],
     "Police_Ticket-loop": ["TicketBook", "Pen"],
+    "Taxi_Enter": ["Taxi"],
+    "Taxi_Ride-loop": ["Taxi"],
+    "Taxi_Exit": ["Taxi"],
 }
+
+ANIMATED_PROPS = ("Bicycle", "Taxi")  # props with their own animation per clip
 
 BIKE = {
     "crank": Vector((0, -0.10, 0.27)),
@@ -57,6 +65,34 @@ BIKE = {
     "front": Vector((0, -0.62, 0.23)),
     "wheel_r": 0.23,
 }
+
+# Taxi stand-in, placed relative to the character root of Taxi_Enter / Taxi_Exit
+# (armature space: +Z up, the character faces -Y). The car faces -X (the
+# character's right) with its right side toward the character; the rear door is
+# hinged at its front edge and swings open toward the character. It is a
+# cartoon car sized for these characters: scale your own taxi so its rear door,
+# sill and seat line up with these numbers.
+TAXI = {
+    "side_y": -0.56,                # outer face of the right-hand doors
+    "width": 1.40,
+    "hinge": Vector((-1.17, -0.56, 0.0)),  # rear door hinge axis (vertical)
+    "door_w": 0.92,                 # door opening: x from hinge.x to hinge.x + door_w
+    "door_open": 75.0,              # degrees, fully open
+    "sill_z": 0.16,
+    "opening_top": 1.94,
+    "roof_z": 2.02,                 # underside of the roof (tall, like a London cab: fits every model)
+    "floor_z": 0.10,
+    "seat_z": 0.34,                 # rear seat cushion top
+    "seat_back_x": -0.12,           # front face of the rear backrest
+    "seat_front_x": -0.58,          # front edge of the rear cushion
+    "front_seat_x": -1.20,          # back face of the front seats
+    "front": -3.05, "rear": 0.80,   # bumper to bumper (x)
+    "wheel_r": 0.27, "wheels_x": (-2.45, 0.32),
+}
+# door-local points (x along the door from the hinge, y outward, z up)
+TAXI_HANDLE_OUT = Vector((0.74, 0.035, 0.80))   # outside handle
+TAXI_GRIP_IN = Vector((0.36, -0.085, 0.72))      # inside armrest / pull
+TAXI_FRAME_IN = Vector((0.82, -0.04, 1.05))      # rear edge of the window frame, inside
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +291,88 @@ def animate_bicycle(lean, wheels, crank, frames, name, state):
         obj.animation_data.action = None
 
 
+def build_taxi(root):
+    t = TAXI
+    paint = material("Taxi_Paint", (0.95, 0.72, 0.08, 1), 0.4)
+    dark = material("Taxi_Trim", (0.08, 0.08, 0.09, 1), 0.6)
+    black = material("Bike_Rubber", (0.05, 0.05, 0.05, 1), 0.9)
+    seat = material("Taxi_Seat", (0.25, 0.18, 0.14, 1), 0.8)
+    check = material("Taxi_Check", (0.95, 0.95, 0.92, 1), 0.5)
+    light = material("Taxi_Light", (1.0, 0.95, 0.75, 1), 0.3)
+    sy, w = t["side_y"], t["width"]
+    yc = sy - w / 2
+    far = sy - w
+    hx, dw = t["hinge"].x, t["door_w"]
+    cab0, cab1 = -2.0, 0.08          # cabin x range (windscreen base .. rear window)
+    belt = 0.84                      # top of the doors / bonnet line
+    th = 0.06                        # panel thickness
+
+    def panel(name, x0, x1, y0, y1, z0, z1, mat=paint, parent=root):
+        return box(name, (x1 - x0, y1 - y0, z1 - z0), ((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2), mat, parent)
+
+    # chassis: floor, bonnet, boot, sills
+    panel("Taxi_Floor", cab0, cab1, far, sy, t["floor_z"] - 0.06, t["floor_z"], dark)
+    panel("Taxi_Bonnet", t["front"], cab0, far, sy, 0.20, belt)
+    panel("Taxi_Boot", cab1, t["rear"], far, sy, 0.20, belt)
+    panel("Taxi_SillR", cab0, cab1, sy - th, sy, 0.16, t["sill_z"])
+    panel("Taxi_SideL", cab0, cab1, far, far + th, 0.16, belt)
+    panel("Taxi_FrontDoor", cab0, hx - 0.06, sy - th, sy, t["sill_z"], belt)
+    panel("Taxi_RearQuarter", hx + dw, cab1, sy - th, sy, t["sill_z"], belt)
+    panel("Taxi_BumperF", t["front"] - 0.06, t["front"], far + 0.05, sy - 0.05, 0.20, 0.36, dark)
+    panel("Taxi_BumperR", t["rear"], t["rear"] + 0.06, far + 0.05, sy - 0.05, 0.20, 0.36, dark)
+    # cabin: pillars and roof (no glass, so the passenger stays visible)
+    top = t["roof_z"]
+    for x0, x1 in ((cab0, cab0 + 0.08), (hx - 0.06, hx), (cab1 - 0.32, cab1)):
+        for y0, y1 in ((sy - th, sy), (far, far + th)):
+            panel("Taxi_Pillar", x0, x1, y0, y1, belt, top, dark)
+    panel("Taxi_RearWall", cab1 - th, cab1, far, sy, belt, top, dark)
+    panel("Taxi_FrontRail", hx + 0.0, hx + dw, sy - th, sy, t["opening_top"], top, dark)
+    panel("Taxi_Roof", cab0, cab1, far, sy, top, top + 0.07)
+    panel("Taxi_Sign", -1.12, -0.82, yc - 0.18, yc + 0.18, top + 0.07, top + 0.20, light)
+    panel("Taxi_Stripe", t["front"], t["rear"], sy - 0.002, sy + 0.004, 0.50, 0.56, check, root)
+    # seats
+    panel("Taxi_RearSeat", t["seat_front_x"], t["seat_back_x"], far + th, sy - 0.14, 0.20, t["seat_z"], seat)
+    panel("Taxi_RearBack", t["seat_back_x"], cab1 - th, far + th, sy - th, t["seat_z"], 1.02, seat)
+    panel("Taxi_FrontSeat", t["front_seat_x"] - 0.48, t["front_seat_x"] - 0.10, far + th, sy - th, 0.22, 0.38, seat)
+    panel("Taxi_FrontBack", t["front_seat_x"] - 0.12, t["front_seat_x"], far + th, sy - th, 0.38, 1.08, seat)
+    # wheels
+    for x in t["wheels_x"]:
+        for y in (sy + 0.01, far - 0.01):
+            cylinder_between("Taxi_Wheel", Vector((x, y - 0.11, t["wheel_r"])), Vector((x, y + 0.11, t["wheel_r"])),
+                             t["wheel_r"], black, root, 16)
+    # rear door, pivoting about the hinge
+    door = empty("Taxi_Door", root)
+    door.location = t["hinge"]
+    panel("Taxi_DoorPanel", 0.0, dw, -th, 0.0, t["sill_z"] + 0.01, belt, paint, door)
+    panel("Taxi_DoorStripe", 0.0, dw, -0.002, 0.004, 0.50, 0.56, check, door)
+    panel("Taxi_DoorFrameTop", 0.0, dw, -0.04, 0.0, t["opening_top"] - 0.05, t["opening_top"], dark, door)
+    panel("Taxi_DoorFrameRear", dw - 0.05, dw, -0.04, 0.0, belt, t["opening_top"], dark, door)
+    h = TAXI_HANDLE_OUT
+    panel("Taxi_Handle", h.x - 0.06, h.x + 0.04, 0.0, 0.025, h.z - 0.015, h.z + 0.015, dark, door)
+    g = TAXI_GRIP_IN
+    panel("Taxi_Armrest", g.x - 0.18, g.x + 0.12, -th - 0.05, -th, g.z - 0.05, g.z, dark, door)
+    return door
+
+
+def animate_taxi(door, frames, name, angle):
+    """Key the door into an NLA track `name`: angle(f, frames) -> degrees open."""
+    door.rotation_mode = "XYZ"
+    door.animation_data_create()
+    act = bpy.data.actions.new(f"{name}_{door.name}")
+    act.id_root = "OBJECT"
+    door.animation_data.action = act
+    for f in range(frames + 1):
+        door.rotation_euler = (0.0, 0.0, math.radians(angle(f, frames)))
+        door.keyframe_insert("rotation_euler", frame=f)
+    for fc in act.fcurves:
+        for kp in fc.keyframe_points:
+            kp.interpolation = "LINEAR"
+    track = door.animation_data.nla_tracks.new()
+    track.name = name
+    track.strips.new(name, 0, act)
+    door.animation_data.action = None
+
+
 def ellipsoid(name, radii, loc, mat, parent=None):
     bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=1, location=(0, 0, 0))
     o = bpy.context.active_object
@@ -380,6 +498,12 @@ def build(name, animate=False):
             import animations
             for track, (anim, state) in animations.BIKE_TRACKS.items():
                 animate_bicycle(lean, wheels, crank, animations.ANIMATIONS[anim][1], track, state)
+    elif name == "Taxi":
+        door = build_taxi(root)
+        if animate:
+            import animations
+            for track, (anim, angle) in animations.TAXI_TRACKS.items():
+                animate_taxi(door, animations.ANIMATIONS[anim][1], track, angle)
     else:
         BUILDERS[name](root)
     return root
@@ -391,10 +515,10 @@ def attach_for_animation(anim, char_arm):
     offsets = load_offsets()
     made = []
     for name in ANIM_PROPS.get(anim, []):
-        root = build(name, animate=name == "Bicycle")
-        if name == "Bicycle":
+        root = build(name, animate=name in ANIMATED_PROPS)
+        if name in ANIMATED_PROPS:
             # follow the scene timeline in the preview
-            want = animations.bike_track_for(anim)
+            want = animations.bike_track_for(anim) if name == "Bicycle" else animations.taxi_track_for(anim)
             for o in [root] + list(root.children_recursive):
                 if o.animation_data and o.animation_data.nla_tracks:
                     tracks = list(o.animation_data.nla_tracks)
@@ -424,10 +548,10 @@ def export_all():
     os.makedirs(PROPS_DIR, exist_ok=True)
     offsets = load_offsets()
     for name in ["Box", "Umbrella", "Phone", "Bicycle", "Chair", "Cello_Carried", "Cello_Played", "Bow",
-                 "Radio_Mic", "TicketBook", "Pen"]:
+                 "Radio_Mic", "TicketBook", "Pen", "Taxi"]:
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o, do_unlink=True)
-        root = build(name, animate=name == "Bicycle")
+        root = build(name, animate=name in ANIMATED_PROPS)
         bone_prop = name in offsets and offsets[name][0] is not None
         if name in offsets:
             root.matrix_basis = offsets[name][1]
@@ -438,7 +562,7 @@ def export_all():
         bpy.ops.export_scene.gltf(
             filepath=os.path.join(PROPS_DIR, name + ".glb"), export_format="GLB", use_selection=True,
             export_yup=not bone_prop, export_apply=True,
-            export_animations=name == "Bicycle", export_animation_mode="NLA_TRACKS",
+            export_animations=name in ANIMATED_PROPS, export_animation_mode="NLA_TRACKS",
             export_force_sampling=True, export_optimize_animation_size=False,
             export_optimize_animation_keep_anim_object=True,
         )

@@ -214,6 +214,37 @@ def wave_once(ctx, frames):
 
 
 # ---------------------------------------------------------------------------
+# Hailing a taxi: standing at the kerb facing the street, right arm straight up
+# and out toward the traffic, leaning out a little, watching the cars come.
+
+
+def taxi_hail(ctx, frames):
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        # weight on the forward (right) foot, leaning out into the street
+        ankles = {"L": ctx.ankle["L"] + V(0.0, 0.05, 0.0), "R": ctx.ankle["R"] + V(-0.02, -0.07, 0.0)}
+        hips_to(ctx, p, V(-0.02, -0.025, ctx.hips_z - 0.012), roll=2.5, yaw=-6)
+        p.rotate("Torso", LEFT, 6)
+        p.rotate("Torso", FWD, 5)  # lean toward the raised arm
+        breathe(p, ph * 2)
+        plant_feet(ctx, p, ankles)
+        relaxed_arms(ctx, p)
+        p.rotate("Arm.L", BACK, -4)
+        # arm up and out, with an eager little pump now and then
+        pump = max(0.0, math.sin(ph * 2 * math.pi * 3)) * (1.0 if ph < 0.5 else 0.4)
+        f, d = body_frame(p)
+        reach = d(RIGHT * 0.55 + FWD * 0.35 + UP * (0.85 + 0.12 * pump))
+        palm = p.head("Arm.R") + reach * 0.615
+        fingers = rot(FWD, -6 * pump) @ reach
+        arm_to(p, "R", palm, fingers, d(FWD + RIGHT * 0.3), d(V(-0.6, 0.5, -1)))
+        # watch the traffic coming from the right, scanning a little
+        look(p, yaw=-34 + 10 * wave(ph, 0.1), pitch=-6 + 3 * wave(ph * 2), roll=-3, torso_share=0.15)
+        return p
+    return pose
+
+
+# ---------------------------------------------------------------------------
 # Sitting on a chair
 #
 # The seat is behind the character's root: sitting moves the hips back by
@@ -707,10 +738,6 @@ BIKE_TRACKS = {
 }
 
 
-def bike_track_for(anim):
-    return next((t for t, (a, _) in BIKE_TRACKS.items() if a == anim), None)
-
-
 def _ride(ctx, p, alpha, pedal=1.0, bob=0.0, lean=0.0, foot_down=0.0):
     """Rider on the bike. lean: bike lean (deg, + = to the rider's left);
     foot_down: 0 = left foot on its pedal .. 1 = left foot on the ground."""
@@ -802,6 +829,58 @@ def cycling_start(ctx, frames):
         look(p, pitch=14 * (1 - ramp(fr, 0, 16)), yaw=-8 * (1 - ramp(fr, 0, 12)))
         return p
     return pose
+
+
+# Hand signals, given while coasting. Each clip is as long as Cycling_Coast and
+# starts and ends on its frame 0, so coast -> signal -> coast has no seam; the
+# bicycle plays its Coast animation underneath (BIKE_SIGNAL_TRACK).
+SIGNAL_FRAMES = _COAST_FRAMES
+SIGNAL_KEYS = [(0.0, 0.0), (0.07, 0.0), (0.22, 1.0), (0.72, 1.0), (0.92, 0.0), (1.0, 0.0)]
+
+
+def _signal_arm(p, kind):
+    """Pose the signalling arm: "Left"/"Right" = arm straight out, "Stop" = left arm bent down."""
+    f, d = body_frame(p)
+    if kind == "Stop":
+        s, sx = "L", 1.0
+        sh = p.head("Arm.L")
+        arm_to(p, s, sh + d(LEFT) * 0.27 + d(DOWN) * 0.33 + d(FWD) * 0.02, d(DOWN), d(BACK),
+               d(V(1, 0.2, 0.4)))
+        return s
+    s = "L" if kind == "Left" else "R"
+    sx = SIDE[s]
+    sh = p.head(f"Arm.{s}")
+    arm_to(p, s, sh + d(LEFT * sx) * 0.60 + d(DOWN) * 0.06 + d(FWD) * 0.04, d(LEFT * sx + DOWN * 0.1), d(DOWN),
+           d(V(0, 1, -0.3)))
+    return s
+
+
+def cycling_signal(kind):
+    def build(ctx, frames):
+        coast = cycling_coast(ctx, frames)
+
+        def pose(fr):
+            ph = fr / frames
+            k = keyed(ph, SIGNAL_KEYS)
+            p = coast(fr)
+            sig = p.copy()
+            s = _signal_arm(sig, kind)
+            blend_bones(p, sig, k, ARM[s])
+            # check over the shoulder toward the turn first, then look ahead
+            glance = math.sin(math.pi * ramp(ph, 0.05, 0.5))
+            look(p, yaw=34 * SIDE[s] * glance, pitch=-4 * glance)
+            return p
+        return pose
+    return build
+
+
+BIKE_SIGNAL_TRACK = "Coast-loop"
+
+
+def bike_track_for(anim):
+    if anim.startswith("Cycling_Signal_"):
+        return BIKE_SIGNAL_TRACK
+    return next((t for t, (a, _) in BIKE_TRACKS.items() if a == anim), None)
 
 
 # ---------------------------------------------------------------------------
@@ -1360,6 +1439,358 @@ def police_ticket(ctx, frames):
     return pose
 
 
+# ---------------------------------------------------------------------------
+# Taxi (Props/Taxi.glb at the character root; see props.TAXI). The character
+# starts Taxi_Enter standing on the kerb facing the car's right side, opens the
+# rear door with the right hand, walks round it to the opening, sits down
+# backwards onto the seat, swings the legs in (ending facing forward, -X) and
+# pulls the door shut. Taxi_Ride loops seated; Taxi_Exit reverses the trip and
+# ends where Taxi_Enter started. The taxi's door has an animation per clip
+# (TAXI_TRACKS) to play alongside, like the bicycle.
+
+from props import TAXI, TAXI_FRAME_IN, TAXI_GRIP_IN, TAXI_HANDLE_OUT  # noqa: E402
+
+TAXI_ENTER_FRAMES = TAXI_EXIT_FRAMES = 165
+TAXI_SEATED = V(-0.42, -1.02, TAXI["seat_z"] - 0.025)  # hips, facing -X
+TAXI_KERB = V(-0.67, -0.39, 0.0)  # hips xy when standing in the opening, facing +Y (back to the seat)
+TAXI_EDGE = V(-0.67, -0.70, TAXI["seat_z"])  # hips perched on the seat edge, facing +Y
+_GROUND = 0.0
+
+
+def _yaw_m(yaw):
+    return Matrix.Rotation(math.radians(yaw), 3, "Z")
+
+
+def taxi_door_point(angle, local):
+    return TAXI["hinge"] + _yaw_m(angle) @ local
+
+
+def _door_normal(angle):
+    return _yaw_m(angle) @ BACK  # outward face of the door
+
+
+# door angle keys (frame, degrees); "follow" spans are where a hand drives the door
+ENTER_DOOR = [(0, 0.0), (10, 0.0), (28, 40.0), (44, TAXI["door_open"]), (138, TAXI["door_open"]), (150, 24.0),
+              (156, 0.0), (TAXI_ENTER_FRAMES, 0.0)]
+EXIT_DOOR = [(0, 0.0), (10, 0.0), (26, 36.0), (42, TAXI["door_open"]), (114, TAXI["door_open"]), (136, 30.0),
+             (144, 0.0), (TAXI_EXIT_FRAMES, 0.0)]
+
+
+def taxi_door_enter(f, frames):
+    return keyed(f, ENTER_DOOR)
+
+
+def taxi_door_exit(f, frames):
+    return keyed(f, EXIT_DOOR)
+
+
+def _ankle_z(floor):
+    return floor + 0.071
+
+
+def _foot_keys(keys):
+    """keys: [(frame, V(x, y, floor), yaw, bulge)] for one ankle -> fn(f) -> (ankle, yaw, lifting).
+    Moving segments arc up (and sideways by `bulge`) so the feet step instead of sliding."""
+    def at(f):
+        if f <= keys[0][0]:
+            k = keys[0]
+            return V(k[1].x, k[1].y, _ankle_z(k[1].z)), k[2], 0.0
+        for k0, k1 in zip(keys, keys[1:]):
+            if f <= k1[0]:
+                s = (f - k0[0]) / (k1[0] - k0[0])
+                e = smooth(s)
+                a = V(k0[1].x, k0[1].y, _ankle_z(k0[1].z))
+                b = V(k1[1].x, k1[1].y, _ankle_z(k1[1].z))
+                pos = a.lerp(b, e)
+                d = b - a
+                lift = 0.0
+                if d.length > 0.01:
+                    lift = math.sin(math.pi * s)
+                    side = V(-d.y, d.x, 0).normalized() if d.xy.length > 1e-6 else V(0, 0, 0)
+                    pos += V(0, 0, max(0.06, abs(d.z) * 0.5 + k1[3][1]) * lift) + side * k1[3][0] * lift
+                return pos, lerp(k0[2], k1[2], e), lift
+        k = keys[-1]
+        return V(k[1].x, k[1].y, _ankle_z(k[1].z)), k[2], 0.0
+    return at
+
+
+def _taxi_body(ctx, p, hips, yaw, feet, pitch=0.0, torso=0.0, torso_roll=0.0, seated=0.0):
+    """Hips at `hips` turned by `yaw` (deg, 0 = facing -Y); feet = {side: (ankle, foot yaw)}."""
+    p.translate("Hips", hips - p.head("Hips"))
+    if pitch:
+        p.rotate("Hips", LEFT, pitch)
+    p.rotate("Hips", UP, yaw)
+    r = _yaw_m(yaw)
+    if torso:
+        p.rotate("Torso", r @ LEFT, torso)
+    if torso_roll:
+        p.rotate("Torso", r @ FWD, torso_roll)
+    for s in "LR":
+        ankle, fyaw = feet[s]
+        knee = r @ V(0.25 * SIDE[s], -1, 0.6 * seated)
+        p.leg_ik(s, ankle, knee)
+        p.foot_flat(s, _yaw_m(fyaw) @ FWD)
+    return r
+
+
+def _look_yawed(p, r, yaw=0.0, pitch=0.0, roll=0.0):
+    p.rotate("Head", UP, yaw)
+    p.rotate("Head", r @ LEFT, pitch)
+    if roll:
+        p.rotate("Head", r @ FWD, roll)
+
+
+def _thigh_hands(p, r, tuck=0.0):
+    """tuck 0..1 brings the elbows down and in (to pass the backrest and door frame)."""
+    for s in "LR":
+        sx = SIDE[s]
+        knee = p.head(f"Leg.{s}")
+        hip = p.head(f"UpperLeg.{s}")
+        palm = hip.lerp(knee, 0.62) + r @ V(-0.015 * sx, 0, 0) + V(0, 0, 0.085)
+        arm_to(p, s, palm, r @ (FWD + DOWN * 0.35 + RIGHT * sx * 0.15), DOWN,
+               r @ V(0.7 * sx, 1, 0).lerp(V(0.25 * sx, 0.3, -1), tuck))
+
+
+def _hand_on_door(p, side, angle, local, inside, fingers_local=None):
+    """Hand flat on the door at door-local point `local` (inside or outside face)."""
+    n = _door_normal(angle)
+    pt = taxi_door_point(angle, local)
+    palm_dir = n if inside else -n  # palm faces the door
+    palm = pt - palm_dir * (PALM_SURFACE + (0.012 if inside else 0.05))
+    along = _yaw_m(angle) @ (fingers_local or V(-1, 0, -0.6))
+    arm_to(p, side, palm, along, palm_dir, V(-0.6 * SIDE[side], 0.2, -1) if side == "R" else V(1, 0.2, -1))
+
+
+def _taxi_seated(ctx, p, ph=0.0, sway=0.0):
+    """Riding pose: facing -X, hands on the thighs (used by all three clips)."""
+    yaw = -90.0
+    r = _yaw_m(yaw)
+    floor = TAXI["floor_z"]
+    feet = {s: (V(TAXI_SEATED.x - 0.30, TAXI_SEATED.y + 0.17 * -SIDE[s], _ankle_z(floor)), yaw + 8 * SIDE[s])
+            for s in "LR"}
+    hips = TAXI_SEATED + V(0, 0.006 * sway, 0)
+    _taxi_body(ctx, p, hips, yaw, feet, seated=1.0)
+    p.rotate("Torso", r @ FWD, 1.5 * sway)
+    _thigh_hands(p, r)
+    return r
+
+
+def taxi_ride(ctx, frames):
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        sway = wave(ph * 2) * 0.6 + wave(ph * 5, 0.3) * 0.4  # the car's motion
+        r = _taxi_seated(ctx, p, ph, sway)
+        # watch the city go by out of the right window, now and then ahead
+        _look_yawed(p, r, yaw=-38 * max(0.0, wave(ph, 0.15)) + 6 * wave(ph * 3), pitch=-2 + 2 * wave(ph * 2))
+        return p
+    return pose
+
+
+def _tuck_arms(p, r, k):
+    """Blend both arms toward hands-on-thighs (keeps them clear of the door frame)."""
+    if k > 0:
+        thighs = p.copy()
+        _thigh_hands(thighs, r)
+        for side in "LR":
+            blend_bones(p, thighs, k, ARM[side])
+
+
+def _blend_arm(p, other, k, side):
+    if k > 0:
+        blend_bones(p, other, k, ARM[side])
+
+
+# Taxi_Enter keys --------------------------------------------------------------
+_KERB_R = V(TAXI_KERB.x + 0.19, TAXI_KERB.y + 0.03, _GROUND)
+_KERB_L = V(TAXI_KERB.x - 0.19, TAXI_KERB.y + 0.03, _GROUND)
+_SEAT_R = V(TAXI_SEATED.x - 0.30, TAXI_SEATED.y + 0.17, TAXI["floor_z"])
+_SEAT_L = V(TAXI_SEATED.x - 0.30, TAXI_SEATED.y - 0.17, TAXI["floor_z"])
+NO = (0.0, 0.0)  # step arc: (sideways bulge, extra height)
+
+ENTER_FEET = {
+    "R": _foot_keys([(0, V(-0.19, -0.03, 0), -8, NO), (36, V(-0.19, -0.03, 0), -8, NO),
+                     (48, V(-0.36, -0.08, 0), -60, NO), (58, V(-0.36, -0.08, 0), -60, NO),
+                     (72, _KERB_R, -188, NO), (114, _KERB_R, -188, NO),
+                     (136, _SEAT_R, -82, (0.0, 0.26)), (TAXI_ENTER_FRAMES, _SEAT_R, -82, NO)]),
+    "L": _foot_keys([(0, V(0.19, -0.03, 0), 8, NO), (46, V(0.19, -0.03, 0), 8, NO),
+                     (60, V(-0.60, 0.05, 0), -125, (-0.10, 0.0)), (68, V(-0.60, 0.05, 0), -125, NO),
+                     (84, _KERB_L, -172, NO), (114, _KERB_L, -172, NO),
+                     (138, _SEAT_L, -98, (0.0, 0.30)), (TAXI_ENTER_FRAMES, _SEAT_L, -98, NO)]),
+}
+
+
+def _standing_hips(ctx, feet, lifts):
+    """Hips over the feet (as in the idle stance), shifted over the planted foot during a step."""
+    (al, yl), (ar, yr) = feet["L"], feet["R"]
+    yaw = (yl + yr) / 2
+    mid = (al + ar) / 2
+    hips = mid + _yaw_m(yaw) @ V(0, 0.03, 0)
+    hips.z = ctx.hips_z
+    for s, other in (("L", "R"), ("R", "L")):
+        if lifts[s] > 0:
+            hips += (feet[other][0] - mid) * V(0.35, 0.35, 0) * lifts[s]
+            hips.z -= 0.012 * lifts[s]
+    return hips, yaw
+
+
+def taxi_enter(ctx, frames):
+    open_door = TAXI["door_open"]
+    seated_ref = taxi_ride(ctx, 120)(0)
+
+    def pose(fr):
+        p = ctx.stand()
+        feet, lifts = {}, {}
+        for s in "LR":
+            a, y, l = ENTER_FEET[s](fr)
+            feet[s], lifts[s] = (a, y), l
+        door = taxi_door_enter(fr, frames)
+        if fr <= 84:
+            # standing / walking round the door
+            hips, yaw = _standing_hips(ctx, feet, lifts)
+            lean = -4 * math.sin(math.pi * ramp(fr, 8, 30))  # leaning back while pulling the door
+            r = _taxi_body(ctx, p, hips, yaw, feet, torso=lean)
+            breathe(p, fr / 60)
+            relaxed_arms(ctx, p)
+            reach = ramp(fr, 0, 10) * (1 - ramp(fr, 28, 42))
+            if reach > 0:
+                hand = p.copy()
+                _hand_on_door(hand, "R", min(door, 40.0), TAXI_HANDLE_OUT, inside=False, fingers_local=V(-0.3, 0, -1))
+                _blend_arm(p, hand, smooth(reach), "R")
+            _look_yawed(p, r, yaw=-20 * ramp(fr, 30, 50) * (1 - ramp(fr, 60, 80)), pitch=8 * (1 - ramp(fr, 30, 60)))
+            _tuck_arms(p, r, ramp(fr, 76, 98))
+            return p
+        if fr <= 114:
+            # sit down backwards onto the seat edge, ducking under the roof
+            s = ease_in_out(ramp(fr, 84, 112))
+            yaw = -180.0
+            stand = V(TAXI_KERB.x, TAXI_KERB.y, ctx.hips_z)
+            hips = stand.lerp(TAXI_EDGE, s)
+            hips.y += 0.03 * math.sin(math.pi * s)
+            duck = 30 * math.sin(math.pi * clamp(s * 1.15))
+            r = _taxi_body(ctx, p, hips, yaw, feet, pitch=duck * 0.5, torso=duck * 0.6, seated=s)
+            p.rotate("Head", r @ LEFT, -duck * 0.5)
+            relaxed_arms(ctx, p)
+            thighs = p.copy()
+            _thigh_hands(thighs, r)
+            for side in "LR":
+                _blend_arm(p, thighs, ramp(fr, 76, 98), side)
+            return p
+        # swing the legs in, turning to face forward; then pull the door shut
+        s = ease_in_out(ramp(fr, 114, 138))
+        yaw = lerp(-180.0, -90.0, s)
+        hips = TAXI_EDGE.lerp(TAXI_SEATED, s)
+        # slide in while turning; slide back along the seat once the door is shut
+        hips.x = lerp(TAXI_EDGE.x, TAXI_SEATED.x, ease_in_out(ramp(fr, 148, 162)))
+        hips.z += 0.03 * math.sin(math.pi * s)  # lift a little off the seat while turning
+        r = _taxi_body(ctx, p, hips, yaw, feet, torso=-6 * math.sin(math.pi * s), seated=1.0)
+        tuck = math.sin(math.pi * s)  # elbows in while turning past the backrest
+        _thigh_hands(p, r, tuck)
+        reach = ramp(fr, 128, 138) * (1 - ramp(fr, 150, 158))
+        lean = 18 * smooth(reach)
+        if lean:
+            p.rotate("Torso", r @ FWD, -lean)  # lean out toward the door (rider's right)
+            p.rotate("Torso", r @ LEFT, lean * 0.4)
+            _thigh_hands(p, r)
+            hand = p.copy()
+            _hand_on_door(hand, "R", max(door, 24.0), TAXI_GRIP_IN, inside=True, fingers_local=V(-1, 0, -0.2))
+            _blend_arm(p, hand, smooth(reach), "R")
+        _look_yawed(p, r, yaw=-30 * smooth(reach), pitch=6 * smooth(reach))
+        # settle into the ride pose
+        k = ramp(fr, 156, frames)
+        if k > 0:
+            blend_bones(p, seated_ref, smooth(k), p.rig.names)
+        return p
+    return pose
+
+
+EXIT_FEET = {
+    "R": _foot_keys([(0, _SEAT_R, -82, NO), (30, _SEAT_R, -82, NO), (54, _KERB_R, -188, (0.0, 0.26)),
+                     (88, _KERB_R, -188, NO), (100, V(-0.42, 0.14, 0), -120, NO),
+                     (112, V(-0.42, 0.14, 0), -120, NO), (124, V(-0.22, 0.06, 0), -45, NO),
+                     (136, V(-0.22, 0.06, 0), -45, NO), (150, V(-0.19, -0.03, 0), -8, NO),
+                     (TAXI_EXIT_FRAMES, V(-0.19, -0.03, 0), -8, NO)]),
+    "L": _foot_keys([(0, _SEAT_L, -98, NO), (32, _SEAT_L, -98, NO), (56, _KERB_L, -172, (0.0, 0.30)),
+                     (96, _KERB_L, -172, NO), (108, V(-0.50, -0.10, 0), -84, NO),
+                     (118, V(-0.50, -0.10, 0), -84, NO), (132, V(0.02, -0.06, 0), -20, (0.08, 0.0)),
+                     (142, V(0.02, -0.06, 0), -20, NO), (154, V(0.19, -0.03, 0), 8, NO),
+                     (TAXI_EXIT_FRAMES, V(0.19, -0.03, 0), 8, NO)]),
+}
+
+
+def taxi_exit(ctx, frames):
+    seated_ref = taxi_ride(ctx, 120)(0)
+
+    def pose(fr):
+        p = ctx.stand()
+        feet, lifts = {}, {}
+        for s in "LR":
+            a, y, l = EXIT_FEET[s](fr)
+            feet[s], lifts[s] = (a, y), l
+        door = taxi_door_exit(fr, frames)
+        if fr <= 56:
+            # push the door open, then swing the legs out
+            s = ease_in_out(ramp(fr, 30, 56))
+            yaw = lerp(-90.0, -180.0, s)
+            hips = TAXI_SEATED.lerp(TAXI_EDGE, s)
+            hips.z += 0.03 * math.sin(math.pi * s)
+            reach = ramp(fr, 0, 10) * (1 - ramp(fr, 24, 34))
+            lean = 14 * smooth(reach)
+            r = _taxi_body(ctx, p, hips, yaw, feet, torso=-6 * math.sin(math.pi * s) + lean * 0.4,
+                           torso_roll=-lean, seated=1.0)
+            _thigh_hands(p, r, math.sin(math.pi * s))
+            if reach > 0:
+                hand = p.copy()
+                _hand_on_door(hand, "R", min(door, 36.0), TAXI_GRIP_IN, inside=True, fingers_local=V(-1, 0, -0.2))
+                _blend_arm(p, hand, smooth(reach), "R")
+            _look_yawed(p, r, yaw=-25 * smooth(reach), pitch=6 * smooth(reach))
+            k = 1 - ramp(fr, 0, 8)
+            if k > 0:
+                blend_bones(p, seated_ref, smooth(k), p.rig.names)
+            return p
+        if fr <= 88:
+            # stand up out of the car, ducking under the roof
+            s = ease_in_out(ramp(fr, 58, 88))
+            yaw = -180.0
+            stand = V(TAXI_KERB.x, TAXI_KERB.y, ctx.hips_z)
+            hips = TAXI_EDGE.lerp(stand, s)
+            hips.y += 0.03 * math.sin(math.pi * s)
+            duck = 34 * math.sin(math.pi * clamp(s * 1.1 + 0.05))
+            r = _taxi_body(ctx, p, hips, yaw, feet, pitch=duck * 0.5, torso=duck * 0.6, seated=1 - s)
+            p.rotate("Head", r @ LEFT, -duck * 0.5)
+            relaxed_arms(ctx, p)
+            thighs = p.copy()
+            _thigh_hands(thighs, r)
+            for side in "LR":
+                _blend_arm(p, thighs, 1 - ramp(fr, 92, 106), side)
+            return p
+        # step out, turn toward the door and pull it shut while backing onto the kerb
+        hips, yaw = _standing_hips(ctx, feet, lifts)
+        r = _taxi_body(ctx, p, hips, yaw, feet)
+        breathe(p, fr / 60)
+        relaxed_arms(ctx, p)
+        _tuck_arms(p, r, 1 - ramp(fr, 92, 106))
+        reach = ramp(fr, 102, 114) * (1 - ramp(fr, 134, 140))
+        if reach > 0:
+            hand = p.copy()
+            _hand_on_door(hand, "R", max(door, 30.0), TAXI_FRAME_IN, inside=True, fingers_local=V(1, 0, 0.2))
+            _blend_arm(p, hand, smooth(reach), "R")
+        _look_yawed(p, r, yaw=-15 * smooth(reach), pitch=4 * smooth(reach))
+        return p
+    return pose
+
+
+TAXI_TRACKS = {
+    "Enter": ("Taxi_Enter", taxi_door_enter),
+    "Ride-loop": ("Taxi_Ride-loop", lambda f, frames: 0.0),
+    "Exit": ("Taxi_Exit", taxi_door_exit),
+}
+
+
+def taxi_track_for(anim):
+    return next((t for t, (a, _) in TAXI_TRACKS.items() if a == anim), None)
+
+
 # Poses used only as references for prop offsets
 REF_POSES = {"_ref_grip": _ref_grip, "_ref_book": _ref_book}
 
@@ -1400,6 +1831,9 @@ ANIMATIONS = {
     "Cycling_Stop": (cycling_stop, STOP_FRAMES, False),
     "Cycling_Rest-loop": (cycling_rest, 90, True),
     "Cycling_Start": (cycling_start, START_FRAMES, False),
+    "Cycling_Signal_Left": (cycling_signal("Left"), SIGNAL_FRAMES, False),
+    "Cycling_Signal_Right": (cycling_signal("Right"), SIGNAL_FRAMES, False),
+    "Cycling_Signal_Stop": (cycling_signal("Stop"), SIGNAL_FRAMES, False),
     "Sit_Floor_Down": (sit_floor_down, 54, False),
     "Sit_Floor_Idle-loop": (sit_floor_idle, 120, True),
     "Sit_Floor_StandUp": (sit_floor_up, 54, False),
@@ -1419,4 +1853,8 @@ ANIMATIONS = {
     "Cello_Rest-loop": (cello_rest, 90, True),
     "Police_Radio-loop": (police_radio, 120, True),
     "Police_Ticket-loop": (police_ticket, 180, True),
+    "Taxi_Hail-loop": (taxi_hail, 90, True),
+    "Taxi_Enter": (taxi_enter, TAXI_ENTER_FRAMES, False),
+    "Taxi_Ride-loop": (taxi_ride, 120, True),
+    "Taxi_Exit": (taxi_exit, TAXI_EXIT_FRAMES, False),
 }

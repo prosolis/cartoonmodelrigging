@@ -31,6 +31,9 @@ ANIM_PROPS = {
     "Phone_Talk-loop": ["Phone"],
     "Cycling-loop": ["Bicycle"],
     "Cycling_Coast-loop": ["Bicycle"],
+    "Cycling_Stop": ["Bicycle"],
+    "Cycling_Rest-loop": ["Bicycle"],
+    "Cycling_Start": ["Bicycle"],
     "Sit_Chair_Idle-loop": ["Chair"],
     "Sit_Chair_Down": ["Chair"],
     "Sit_Chair_StandUp": ["Chair"],
@@ -162,7 +165,9 @@ def build_bicycle(root, frames=None):
     black = material("Bike_Rubber", (0.05, 0.05, 0.05, 1), 0.9)
     metal = material("Bike_Metal", (0.65, 0.65, 0.68, 1), 0.3, 1.0)
     seat_m = material("Bike_Seat", (0.15, 0.1, 0.08, 1), 0.8)
-    frame = empty("Bike_Frame", root)
+    # everything hangs off Bike_Lean, which pivots about the ground line (roll about Y) when stopped
+    lean = empty("Bike_Lean", root)
+    frame = empty("Bike_Frame", lean)
     crank, seat, bar = b["crank"], b["seat"], b["bar"]
     head_low = b["front"].lerp(bar, 0.45)
     t = 0.022
@@ -181,7 +186,7 @@ def build_bicycle(root, frames=None):
     box("Saddle", (0.1, 0.2, 0.04), seat, seat_m, frame)
     wheels = []
     for name, c in (("Bike_WheelRear", b["rear"]), ("Bike_WheelFront", b["front"])):
-        w = empty(name, root)
+        w = empty(name, lean)
         w.location = c
         bpy.ops.mesh.primitive_torus_add(major_radius=b["wheel_r"] - 0.02, minor_radius=0.022,
                                          major_segments=16, minor_segments=6, location=(0, 0, 0),
@@ -195,7 +200,7 @@ def build_bicycle(root, frames=None):
             cylinder_between("Spoke", -d, d, 0.005, metal, w, 4)
         cylinder_between("Hub", Vector((-0.04, 0, 0)), Vector((0.04, 0, 0)), 0.02, metal, w)
         wheels.append(w)
-    cr = empty("Bike_Crank", root)
+    cr = empty("Bike_Crank", lean)
     cr.location = crank
     r = b["crank_r"]
     bpy.ops.mesh.primitive_cylinder_add(vertices=12, radius=0.06, depth=0.01, location=(0.06, 0, 0),
@@ -212,29 +217,33 @@ def build_bicycle(root, frames=None):
         p = empty("Pedal_" + ("L" if sx > 0 else "R"), cr)
         p.location = end + Vector((sx * 0.04, 0, 0))
         box("Pedal", (0.07, 0.08, 0.015), (0, 0, 0), black, p)
-    return frame, wheels, cr
+    return lean, wheels, cr
 
 
-COAST_FRAMES = 60
+def animate_bicycle(lean, wheels, crank, frames, name, state):
+    """Key the bike into NLA tracks named `name`, one key per frame.
 
-
-def animate_bicycle(wheels, crank, frames, name, crank_turns=1.0, wheel_turns=1.6, crank_angle=0.0):
-    """Key one loop of crank and wheel rotation into NLA tracks named `name`."""
+    state(f, frames) -> (lean degrees, crank angle, wheel angle), shared with the rider
+    animation (animations.BIKE_TRACKS) so the two always match.
+    """
     pedals = [c for c in crank.children if c.name.startswith("Pedal_")]
-    parts = [(crank, crank_turns, crank_angle), (wheels[0], wheel_turns, 0.0), (wheels[1], wheel_turns, 0.0)]
-    parts += [(p, -crank_turns, -crank_angle) for p in pedals]
-    for obj, turns, start in parts:
+    # rotating about +X: a positive angle moves the top forward (-Y) -> riding forward;
+    # the pedals counter-rotate to stay level; the lean rolls about +Y (+ = to the rider's left)
+    parts = [(lean, 1, lambda st: math.radians(st[0])), (crank, 0, lambda st: st[1]),
+             (wheels[0], 0, lambda st: st[2]), (wheels[1], 0, lambda st: st[2])]
+    parts += [(p, 0, lambda st: -st[1]) for p in pedals]
+    states = [state(f, frames) for f in range(frames + 1)]
+    for obj, axis, value in parts:
         obj.rotation_mode = "XYZ"
         obj.animation_data_create()
         act = bpy.data.actions.new(f"{name}_{obj.name}")
         act.id_root = "OBJECT"
         obj.animation_data.action = act
-        steps = 8
-        for i in range(steps + 1):
-            f = frames * i / steps
-            # rotating about +X: a positive angle moves the top forward (-Y) -> riding forward
-            obj.rotation_euler = (start + 2 * math.pi * turns * i / steps, 0, 0)
-            obj.keyframe_insert("rotation_euler", index=0, frame=f)
+        for f, st in enumerate(states):
+            rot = [0.0, 0.0, 0.0]
+            rot[axis] = value(st)
+            obj.rotation_euler = rot
+            obj.keyframe_insert("rotation_euler", frame=f)
         for fc in act.fcurves:
             for kp in fc.keyframe_points:
                 kp.interpolation = "LINEAR"
@@ -321,14 +330,14 @@ def save_offsets(offsets):
         json.dump(data, f, indent=1)
 
 
-def build(name, cycle_frames=None):
+def build(name, animate=False):
     root = empty(name)
     if name == "Bicycle":
-        _, wheels, crank = build_bicycle(root)
-        if cycle_frames:
-            animate_bicycle(wheels, crank, cycle_frames, "Pedal-loop")
-            animate_bicycle(wheels, crank, COAST_FRAMES, "Coast-loop", crank_turns=0.0, wheel_turns=2.5,
-                            crank_angle=math.pi / 2)
+        lean, wheels, crank = build_bicycle(root)
+        if animate:
+            import animations
+            for track, (anim, state) in animations.BIKE_TRACKS.items():
+                animate_bicycle(lean, wheels, crank, animations.ANIMATIONS[anim][1], track, state)
     else:
         BUILDERS[name](root)
     return root
@@ -340,11 +349,10 @@ def attach_for_animation(anim, char_arm):
     offsets = load_offsets()
     made = []
     for name in ANIM_PROPS.get(anim, []):
-        frames = animations.ANIMATIONS[anim][1] if name == "Bicycle" else None
-        root = build(name, frames)
+        root = build(name, animate=name == "Bicycle")
         if name == "Bicycle":
             # follow the scene timeline in the preview
-            want = "Coast-loop" if "Coast" in anim else "Pedal-loop"
+            want = animations.bike_track_for(anim)
             for o in [root] + list(root.children_recursive):
                 if o.animation_data and o.animation_data.nla_tracks:
                     tracks = list(o.animation_data.nla_tracks)
@@ -369,14 +377,14 @@ def attach_for_animation(anim, char_arm):
     return made
 
 
-def export_all(cycle_frames):
+def export_all():
     """Export every prop glb into Characters_1_Godot/Props/."""
     os.makedirs(PROPS_DIR, exist_ok=True)
     offsets = load_offsets()
     for name in ["Box", "Umbrella", "Phone", "Bicycle", "Chair", "Cello_Carried", "Cello_Played", "Bow"]:
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o, do_unlink=True)
-        root = build(name, cycle_frames if name == "Bicycle" else None)
+        root = build(name, animate=name == "Bicycle")
         bone_prop = name in offsets and offsets[name][0] is not None
         if name in offsets:
             root.matrix_basis = offsets[name][1]

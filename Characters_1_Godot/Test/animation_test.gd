@@ -5,6 +5,14 @@ extends Node3D
 
 const CROWD_SIZE := 12
 const Hats := preload("../Props/santa_hat.gd")
+# Rider animation -> Bicycle.glb animation to play with it
+const BIKE_ANIMS := {
+	"Cycling": "Pedal",
+	"Cycling_Coast": "Coast",
+	"Cycling_Stop": "Stop",
+	"Cycling_Rest": "Rest",
+	"Cycling_Start": "Start",
+}
 
 # Props for some of the added animations: animation name prefix -> list of [prop scene, bone].
 # An empty bone means the prop is placed at the character root (bicycle, chair, played cello).
@@ -227,9 +235,9 @@ func _attach_prop(scene: PackedScene, bone: String, i: int, anim: String) -> voi
 		# root prop: the placement is baked into the scene
 		ch.add_child(prop)
 		props.append(prop)
-		# the bicycle has its own wheel/crank loop: play it in sync with the rider
+		# the bicycle has its own animation per riding clip (wheels, crank, lean): play it in sync
 		var prop_ap := prop.find_child("AnimationPlayer", true, false) as AnimationPlayer
-		var prop_anim := "Coast" if anim.contains("Coast") else "Pedal"
+		var prop_anim: String = BIKE_ANIMS.get(anim, "Pedal")
 		if prop_ap and prop_ap.has_animation(prop_anim):
 			prop_ap.play(prop_anim)
 			prop_ap.seek(players[i].current_animation_position, true)

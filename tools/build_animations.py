@@ -72,8 +72,7 @@ def main(argv):
 
     # prop attachment offsets, measured on the reference frames
     props.save_offsets({prop: ctx.prop_offset(prop) for prop in animations.PROP_REFS})
-    cycle = animations.ANIMATIONS.get("Cycling-loop")
-    props.export_all(cycle[1] if cycle else None)
+    props.export_all()
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@
 `Characters_1_Godot/` is the Characters_1 pack for Godot 4 (308 characters sharing one
 21-bone skeleton). The original zip is kept as `Characters_1_Godot.zip`.
 
-This repo adds **35 new animations** to the pack's shared animation library, plus a few
+This repo adds **38 new animations** to the pack's shared animation library, plus a few
 props that go with them. All 47 original animations are untouched.
 
 ![New animations](Characters_1_Godot/Preview_NewAnimations.png)
@@ -25,7 +25,7 @@ that suffix on import (`Wave_B-loop` shows up as `Wave_B`).
 | Phone | `Phone_Walk` (walking, looking down), `Phone_Idle` (texting), `Phone_Talk` (call at the ear) | `Props/Phone.glb` on `IteamSlot.R` |
 | Hot | `Fan_Hot` (fanning the face, hand on hip) | |
 | Cold | `Shiver_Cold` (hunched, shaking, rubbing hands) | |
-| Cycling | `Cycling` (pedalling), `Cycling_Coast` | `Props/Bicycle.glb` at the character root |
+| Cycling | `Cycling` (pedalling), `Cycling_Coast`, `Cycling_Stop` (brake, left foot down), `Cycling_Rest` (stopped, looking both ways), `Cycling_Start` (push off) | `Props/Bicycle.glb` at the character root |
 | Cello | `Cello_Carry_Idle`, `Cello_Carry_Walk` (holding it by the neck), `Cello_Play` (seated, bowing), `Cello_Rest` (seated, bow down, swaying) | carrying: `Props/Cello_Carried.glb` on `IteamSlot.R`; playing: `Props/Cello_Played.glb` + `Props/Chair.glb` at the root, `Props/Bow.glb` on `IteamSlot.R` |
 | Extras | `Talk`, `Clap`, `Cheer`, `Point_A`, `Nod_Yes`, `Shake_No`, `Shrug`, `Dance_A`, `Wait_HandsBehind` | |
 
@@ -46,9 +46,22 @@ att.add_child(preload("res://Characters_1_Godot/Props/Umbrella.glb").instantiate
 Root props (`Bicycle`, `Chair`, `Cello_Played`) are added as children of the character root
 with an identity transform; their placement is baked in too.
 
-The bicycle is a child of the character root (not a bone). Its own `AnimationPlayer` has
-`Pedal` (0.8 s, matches `Cycling`) and `Coast` (2 s, matches `Cycling_Coast`). Start it together
-with the rider so the cranks line up with the feet.
+The bicycle is a child of the character root (not a bone). Its own `AnimationPlayer` has one
+animation per riding clip, the same length; start it together with the rider so the crank, wheels
+and lean line up with the feet:
+
+| Rider | Bicycle | |
+|---|---|---|
+| `Cycling` | `Pedal` | 0.8 s loop |
+| `Cycling_Coast` | `Coast` | 2 s loop |
+| `Cycling_Stop` | `Stop` | 1.5 s: brakes, wheels stop, the bike leans onto the left foot |
+| `Cycling_Rest` | `Rest` | 3 s loop: stopped, leaning on the left foot |
+| `Cycling_Start` | `Start` | 1.2 s: pushes off, the bike straightens, wheels speed up |
+
+The clips chain without a seam: `Cycling_Coast` (from its first frame) -> `Cycling_Stop` ->
+`Cycling_Rest` -> `Cycling_Start` -> `Cycling`. When stopped the rider stays on the saddle (their
+legs are too short to stand over the bike) and the bike leans 18 degrees so the left toe reaches
+the ground.
 
 `Test/AnimationTest.tscn` attaches all of this automatically: pick an animation and the matching
 prop appears.

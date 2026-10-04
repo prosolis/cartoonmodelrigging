@@ -72,6 +72,39 @@ from it.
   for a typical head width, so on the two widest heads (Character_3 and Character_4) it can
   overlap the hair a little.
 
+## Model fixes
+
+- `Character_2_2_5` and `Character_2_2_11` shipped with their head and hair skinned 50/50 to the
+  Hips and Head bones, so the head lagged behind in every animation. Their skin weights now match
+  `Character_2_2_1` (same mesh): fully on Head. Nothing else in those files changed.
+
+## Santa hats
+
+![Santa hats](Characters_1_Godot/Preview_SantaHats.png)
+
+`Props/SantaHat.glb` is a Santa hat with a floppy tip that bounces (Godot's
+`SpringBoneSimulator3D`). `Props/santa_hat.gd` (`class_name SantaHat`) puts it on a character:
+
+```gdscript
+SantaHat.apply(character)          # when spawning: hat on during the holiday season, off otherwise
+SantaHat.mode = SantaHat.Mode.ON   # or OFF, or AUTO (the default: Dec 1 - Jan 6)
+SantaHat.update_all(get_tree())    # re-apply to every character passed to apply()
+SantaHat.put_on(character)         # or control it directly
+SantaHat.take_off(character)
+```
+
+`character` is an instance of one of the character `.glb` scenes. Each model has its own fit
+(size and position on its head and hair) in `Props/santa_hat_fits.gd`, which is generated
+for every model, so it just works on all of them. The season dates (`season_start`/`season_end`) and
+the tip's springiness (`tip_stiffness`, `tip_drag`, `tip_gravity`) are static vars you can change.
+
+- **Who gets one:** 256 of the 308 models. The police officers, the hard hats (`Character_B_*`), and
+  `Character_7` (who already wears a hat) are skipped, and so are the zombies (`Character_Z_*`),
+  which are kept for Halloween. `SantaHat.can_wear(character)` tells you.
+- **Umbrella:** the umbrella goes through the hat, so hide the hat while an `Umbrella_*` clip
+  plays: `SantaHat.set_hidden(character, SantaHat.clashes_with(anim))`. The test scene does this.
+- The test scene has a **Santa hats** switch.
+
 ## Regenerating / tweaking
 
 The animations are procedural Python (Blender's `bpy` module), so they can be tuned and rebuilt:
@@ -81,6 +114,8 @@ python3.11 -m venv .venv && .venv/bin/pip install bpy==4.2.* numpy pillow
 .venv/bin/python tools/build_animations.py              # rebuild all new animations + props
 .venv/bin/python tools/build_animations.py Wave_A       # rebuild just one
 .venv/bin/python tools/preview.py out/ Wave_A --props   # render a contact sheet to check it
+.venv/bin/python tools/santa_hat.py                     # rebuild the Santa hat + per-model fits
+.venv/bin/python tools/santa_hat.py --check out/ Character_6_1_1   # render fitted hats
 ```
 
 - `tools/animations.py`: the animation definitions (poses as functions of time)
@@ -88,3 +123,4 @@ python3.11 -m venv .venv && .venv/bin/pip install bpy==4.2.* numpy pillow
 - `tools/props.py`: prop geometry and export
 - `tools/merge_glb.py`: appends animations to the library without touching the originals
 - `tools/check_clearance.py`: umbrella / cello neck vs head clearance check across characters
+- `tools/santa_hat.py`: Santa hat model, per-model fitting (`OVERRIDES` for hand tweaks, skip list)

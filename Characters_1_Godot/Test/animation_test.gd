@@ -4,6 +4,7 @@ extends Node3D
 # Every character uses the same AnimationLibrary (Characters_1_Animations.glb).
 
 const CROWD_SIZE := 12
+const Hats := preload("../Props/santa_hat.gd")
 
 # Props for some of the added animations: animation name prefix -> list of [prop scene, bone].
 # An empty bone means the prop is placed at the character root (bicycle, chair, played cello).
@@ -137,6 +138,15 @@ func _build_ui() -> void:
 	crowd_btn.pressed.connect(func(): _show_crowd(CROWD_SIZE))
 	box.add_child(crowd_btn)
 
+	var hat_btn := CheckButton.new()
+	hat_btn.text = "Santa hats"
+	hat_btn.button_pressed = Hats.is_active()
+	hat_btn.toggled.connect(func(on: bool):
+		Hats.mode = Hats.Mode.ON if on else Hats.Mode.OFF
+		Hats.update_all(get_tree())
+		_update_hats())
+	box.add_child(hat_btn)
+
 	box.add_child(_label("Animation (%d)" % library.get_animation_list().size()))
 	anim_list = ItemList.new()
 	anim_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -247,6 +257,7 @@ func _spawn(path: String, pos: Vector3) -> void:
 	var ap := AnimationPlayer.new()
 	ch.add_child(ap)
 	ap.add_animation_library("", library)
+	Hats.apply(ch)  # Santa hat in the holiday season (or when toggled on)
 	shown.append(ch)
 	players.append(ap)
 
@@ -287,8 +298,15 @@ func _play(anim: String) -> void:
 			ap.seek(fmod(i * 0.37, max(ap.current_animation_length, 0.01)), true)
 		ap.speed_scale = 0.0 if paused else speed
 	_attach_props(anim)
+	_update_hats()
 	var a := library.get_animation(anim)
 	info_label.text = "%s\n%.2f s, %s" % [anim, a.length, "loop" if a.loop_mode != Animation.LOOP_NONE else "once"]
+
+
+func _update_hats() -> void:
+	# the umbrella goes through the hat, so hide hats while it is out
+	for ch in shown:
+		Hats.set_hidden(ch, Hats.clashes_with(current_anim))
 
 
 func _select_anim_in_list() -> void:

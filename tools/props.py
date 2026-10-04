@@ -1,6 +1,6 @@
 """Simple low-poly props that go with the new animations (runs inside bpy).
 
-Bone props (Box, Umbrella, Phone) are exported with their attachment offset
+Bone props (Box, Umbrella, Phone, Pen, ...) are exported with their attachment offset
 baked into the root node, in the bone's local space, so in Godot you add a
 BoneAttachment3D for the listed bone and instance the prop under it with an
 identity transform. The Bicycle is placed relative to the character root.
@@ -34,6 +34,9 @@ ANIM_PROPS = {
     "Cycling_Stop": ["Bicycle"],
     "Cycling_Rest-loop": ["Bicycle"],
     "Cycling_Start": ["Bicycle"],
+    "Cycling_Signal_Left": ["Bicycle"],
+    "Cycling_Signal_Right": ["Bicycle"],
+    "Cycling_Signal_Stop": ["Bicycle"],
     "Sit_Chair_Idle-loop": ["Chair"],
     "Sit_Chair_Down": ["Chair"],
     "Sit_Chair_StandUp": ["Chair"],
@@ -42,7 +45,14 @@ ANIM_PROPS = {
     "Cello_Carry_Walk-loop": ["Cello_Carried"],
     "Cello_Play-loop": ["Cello_Played", "Bow", "Chair"],
     "Cello_Rest-loop": ["Cello_Played", "Bow", "Chair"],
+    "Police_Radio-loop": ["Radio_Mic"],
+    "Police_Ticket-loop": ["TicketBook", "Pen"],
+    "Taxi_Enter": ["Taxi"],
+    "Taxi_Ride-loop": ["Taxi"],
+    "Taxi_Exit": ["Taxi"],
 }
+
+ANIMATED_PROPS = ("Bicycle", "Taxi")  # props with their own animation per clip
 
 BIKE = {
     "crank": Vector((0, -0.10, 0.27)),
@@ -55,6 +65,34 @@ BIKE = {
     "front": Vector((0, -0.62, 0.23)),
     "wheel_r": 0.23,
 }
+
+# Taxi for Taxi_Enter / Taxi_Exit: the PixelClock City Taxi_5 (pixelclock-city-taxis.zip),
+# fitted by tools/taxi.py and placed relative to the character root (armature
+# space: +Z up, the character faces -Y). The car faces -X (the character's
+# right) with its right side toward the character; its right rear door is cut
+# out and hinged at its front edge. These are the fitted car's measurements
+# (taxi.TAXI_SCALE = 1.25) that the animations are built around.
+TAXI = {
+    "side_y": -0.5575,              # outer face of the right-hand side
+    "width": 1.825,
+    "hinge": Vector((-1.025, -0.5575, 0.0)),  # rear door hinge axis (vertical)
+    "door_w": 0.78,                 # door length at window height (0.625 beside the wheel arch)
+    "door_open": 85.0,              # degrees, fully open
+    "sill_z": 0.48,                 # top of the step below the door opening (= cabin floor)
+    "belt_z": 1.24,                 # bottom of the side windows
+    "opening_top": 2.225,
+    "roof_z": 2.21,                 # underside of the roof
+    "floor_z": 0.48,                # cabin floor (a footwell below the sill)
+    "seat_z": 0.78,                 # rear seat cushion top
+    "seat_back_x": -0.26,           # front face of the rear backrest
+    "seat_front_x": -0.76,          # front edge of the rear cushion
+    "front_seat_x": -1.12,          # back face of the front seats
+    "cabin_front_x": -1.95, "cabin_rear_x": -0.26,
+}
+# door-local points (x along the door from the hinge, y outward, z up)
+TAXI_HANDLE_OUT = Vector((0.67, 0.02, 1.106))    # the handle on the car's texture
+TAXI_GRIP_IN = Vector((0.24, -0.07, 1.12))       # inside, below the window (near the hinge)
+TAXI_FRAME_IN = Vector((0.72, -0.21, 1.30))      # rear edge of the window frame, inside (the glass leans in)
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +291,30 @@ def animate_bicycle(lean, wheels, crank, frames, name, state):
         obj.animation_data.action = None
 
 
+def build_taxi(root):
+    import taxi
+    return taxi.build(root)
+
+
+def animate_taxi(door, frames, name, angle):
+    """Key the door into an NLA track `name`: angle(f, frames) -> degrees open."""
+    door.rotation_mode = "XYZ"
+    door.animation_data_create()
+    act = bpy.data.actions.new(f"{name}_{door.name}")
+    act.id_root = "OBJECT"
+    door.animation_data.action = act
+    for f in range(frames + 1):
+        door.rotation_euler = (0.0, 0.0, math.radians(angle(f, frames)))
+        door.keyframe_insert("rotation_euler", frame=f)
+    for fc in act.fcurves:
+        for kp in fc.keyframe_points:
+            kp.interpolation = "LINEAR"
+    track = door.animation_data.nla_tracks.new()
+    track.name = name
+    track.strips.new(name, 0, act)
+    door.animation_data.action = None
+
+
 def ellipsoid(name, radii, loc, mat, parent=None):
     bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=1, location=(0, 0, 0))
     o = bpy.context.active_object
@@ -305,6 +367,43 @@ def build_bow(root):
     box("Bow_Tip", (0.01, 0.015, 0.026), (0, 0.655, -0.012), stick, root)
 
 
+def build_radio_mic(root):
+    # local frame: armature axes (grille facing -Y, up +Z), origin at the mic centre
+    body = material("Radio_Body", (0.06, 0.06, 0.07, 1), 0.6)
+    grille = material("Radio_Grille", (0.22, 0.22, 0.24, 1), 0.5)
+    key = material("Radio_Key", (0.85, 0.35, 0.08, 1), 0.5)
+    box("Radio_Body", (0.06, 0.03, 0.08), (0, 0, 0), body, root)
+    for k in range(4):
+        box("Radio_Slot", (0.04, 0.004, 0.005), (0, -0.0155, 0.022 - k * 0.011), grille, root)
+    box("Radio_Key", (0.008, 0.016, 0.024), (0.032, 0, 0.008), key, root)
+    box("Radio_Clip", (0.03, 0.006, 0.05), (0, 0.017, 0.005), body, root)
+    # coiled cord running up over the shoulder
+    cylinder_between("Radio_Cord", (0, 0.004, 0.04), (0.02, 0.03, 0.09), 0.006, body, root, 6)
+    cylinder_between("Radio_Cord", (0.02, 0.03, 0.09), (0.03, 0.07, 0.11), 0.006, body, root, 6)
+
+
+def build_ticket_book(root):
+    # local frame: long axis +Y, open page facing +Z, origin at the centre (animations.TICKET_BOOK_SIZE)
+    cover = material("Ticket_Cover", (0.10, 0.16, 0.32, 1), 0.6)
+    paper = material("Ticket_Paper", (0.96, 0.95, 0.88, 1), 0.8)
+    ink = material("Ticket_Ink", (0.35, 0.40, 0.55, 1), 0.8)
+    box("Ticket_Cover", (0.16, 0.24, 0.013), (0, 0, -0.0065), cover, root)
+    box("Ticket_Pages", (0.15, 0.23, 0.013), (0, -0.002, 0.0065), paper, root)
+    box("Ticket_Header", (0.12, 0.025, 0.0015), (0, 0.09, 0.0135), cover, root)
+    for k in range(4):
+        box("Ticket_Line", (0.11, 0.003, 0.0012), (0, 0.055 - k * 0.04, 0.0135), ink, root)
+    cylinder_between("Ticket_Spine", (-0.08, 0.12, 0), (0.08, 0.12, 0), 0.009, cover, root, 8)
+
+
+def build_pen(root):
+    # local frame: +Y toward the tip, origin in the fist, tip at y = animations.PEN_TIP
+    barrel = material("Pen_Barrel", (0.05, 0.08, 0.25, 1), 0.4)
+    metal = material("Pen_Metal", (0.75, 0.75, 0.78, 1), 0.3, 1.0)
+    cylinder_between("Pen_Barrel", (0, -0.06, 0), (0, 0.10, 0), 0.007, barrel, root, 8)
+    cylinder_between("Pen_Tip", (0, 0.10, 0), (0, 0.115, 0), 0.0035, metal, root, 6)
+    cylinder_between("Pen_Clip", (0.008, -0.055, 0), (0.008, -0.02, 0), 0.002, metal, root, 4)
+
+
 BUILDERS = {
     "Box": build_box,
     "Umbrella": build_umbrella,
@@ -313,6 +412,9 @@ BUILDERS = {
     "Cello_Carried": lambda root: build_cello(root, endpin=False),
     "Cello_Played": build_cello,
     "Bow": build_bow,
+    "Radio_Mic": build_radio_mic,
+    "TicketBook": build_ticket_book,
+    "Pen": build_pen,
 }
 
 
@@ -338,6 +440,12 @@ def build(name, animate=False):
             import animations
             for track, (anim, state) in animations.BIKE_TRACKS.items():
                 animate_bicycle(lean, wheels, crank, animations.ANIMATIONS[anim][1], track, state)
+    elif name == "Taxi":
+        door = build_taxi(root)
+        if animate:
+            import animations
+            for track, (anim, angle) in animations.TAXI_TRACKS.items():
+                animate_taxi(door, animations.ANIMATIONS[anim][1], track, angle)
     else:
         BUILDERS[name](root)
     return root
@@ -349,10 +457,10 @@ def attach_for_animation(anim, char_arm):
     offsets = load_offsets()
     made = []
     for name in ANIM_PROPS.get(anim, []):
-        root = build(name, animate=name == "Bicycle")
-        if name == "Bicycle":
+        root = build(name, animate=name in ANIMATED_PROPS)
+        if name in ANIMATED_PROPS:
             # follow the scene timeline in the preview
-            want = animations.bike_track_for(anim)
+            want = animations.bike_track_for(anim) if name == "Bicycle" else animations.taxi_track_for(anim)
             for o in [root] + list(root.children_recursive):
                 if o.animation_data and o.animation_data.nla_tracks:
                     tracks = list(o.animation_data.nla_tracks)
@@ -381,10 +489,11 @@ def export_all():
     """Export every prop glb into Characters_1_Godot/Props/."""
     os.makedirs(PROPS_DIR, exist_ok=True)
     offsets = load_offsets()
-    for name in ["Box", "Umbrella", "Phone", "Bicycle", "Chair", "Cello_Carried", "Cello_Played", "Bow"]:
+    for name in ["Box", "Umbrella", "Phone", "Bicycle", "Chair", "Cello_Carried", "Cello_Played", "Bow",
+                 "Radio_Mic", "TicketBook", "Pen", "Taxi"]:
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o, do_unlink=True)
-        root = build(name, animate=name == "Bicycle")
+        root = build(name, animate=name in ANIMATED_PROPS)
         bone_prop = name in offsets and offsets[name][0] is not None
         if name in offsets:
             root.matrix_basis = offsets[name][1]
@@ -395,7 +504,7 @@ def export_all():
         bpy.ops.export_scene.gltf(
             filepath=os.path.join(PROPS_DIR, name + ".glb"), export_format="GLB", use_selection=True,
             export_yup=not bone_prop, export_apply=True,
-            export_animations=name == "Bicycle", export_animation_mode="NLA_TRACKS",
+            export_animations=name in ANIMATED_PROPS, export_animation_mode="NLA_TRACKS",
             export_force_sampling=True, export_optimize_animation_size=False,
             export_optimize_animation_keep_anim_object=True,
         )

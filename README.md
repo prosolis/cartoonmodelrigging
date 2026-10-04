@@ -3,7 +3,7 @@
 `Characters_1_Godot/` is the Characters_1 pack for Godot 4 (308 characters sharing one
 21-bone skeleton). The original zip is kept as `Characters_1_Godot.zip`.
 
-This repo adds **38 new animations** to the pack's shared animation library, plus a few
+This repo adds **52 new animations** to the pack's shared animation library, plus a few
 props that go with them. All 47 original animations are untouched.
 
 ![New animations](Characters_1_Godot/Preview_NewAnimations.png)
@@ -25,12 +25,26 @@ that suffix on import (`Wave_B-loop` shows up as `Wave_B`).
 | Phone | `Phone_Walk` (walking, looking down), `Phone_Idle` (texting), `Phone_Talk` (call at the ear) | `Props/Phone.glb` on `IteamSlot.R` |
 | Hot | `Fan_Hot` (fanning the face, hand on hip) | |
 | Cold | `Shiver_Cold` (hunched, shaking, rubbing hands) | |
-| Cycling | `Cycling` (pedalling), `Cycling_Coast`, `Cycling_Stop` (brake, left foot down), `Cycling_Rest` (stopped, looking both ways), `Cycling_Start` (push off) | `Props/Bicycle.glb` at the character root |
+| Cycling | `Cycling` (pedalling), `Cycling_Coast`, `Cycling_Stop` (brake, left foot down), `Cycling_Rest` (stopped, looking both ways), `Cycling_Start` (push off), `Cycling_Signal_Left` / `_Right` (arm out), `Cycling_Signal_Stop` (left arm bent down) | `Props/Bicycle.glb` at the character root |
 | Cello | `Cello_Carry_Idle`, `Cello_Carry_Walk` (holding it by the neck), `Cello_Play` (seated, bowing), `Cello_Rest` (seated, bow down, swaying) | carrying: `Props/Cello_Carried.glb` on `IteamSlot.R`; playing: `Props/Cello_Played.glb` + `Props/Chair.glb` at the root, `Props/Bow.glb` on `IteamSlot.R` |
+| Police | `Police_Radio` (keys the shoulder mic, talks, lets go to listen), `Police_Ticket` (writes a ticket, glancing up at the car) | `Props/Radio_Mic.glb` on `Torso`; `Props/TicketBook.glb` on `IteamSlot.L` + `Props/Pen.glb` on `IteamSlot.R` |
+| Taxi | `Taxi_Hail` (arm up, watching the traffic), `Taxi_Enter`, `Taxi_Ride` (seated loop), `Taxi_Exit` | `Props/Taxi.glb` at the character root (enter/ride/exit) |
+| Walks | `Walk_Brisk`, `Walk_Stroll`, `Walk_Tired`, `Walk_Happy`, `Walk_Sightseeing` (looking up at the buildings) | |
 | Extras | `Talk`, `Clap`, `Cheer`, `Point_A`, `Nod_Yes`, `Shake_No`, `Shrug`, `Dance_A`, `Wait_HandsBehind` | |
 
-The walking variants are built on the pack's `Walk_C` cycle (1.03 s, in place), so they line up
-with it.
+The walking prop variants (`Carry_Box_Walk`, `Umbrella_Walk`, `Phone_Walk`, `Cello_Carry_Walk`)
+are built on the pack's `Walk_C` cycle (1.03 s, in place), so they line up with it.
+
+The `Walk_*` variants have their own cycle. Like the pack's walks they walk in place; move the
+character at this speed so the planted foot doesn't slide:
+
+| Walk | Cycle | Speed |
+|---|---|---|
+| `Walk_Brisk` | 0.8 s | 1.29 m/s |
+| `Walk_Stroll` | 1.33 s (clip has 2 cycles) | 0.53 m/s |
+| `Walk_Tired` | 1.47 s | 0.39 m/s |
+| `Walk_Happy` | 0.87 s (clip has 2 cycles) | 0.96 m/s |
+| `Walk_Sightseeing` | 1.13 s (clip has 4 cycles) | 0.68 m/s |
 
 ## Using the props in Godot
 
@@ -38,7 +52,7 @@ Bone props have their offset baked into the file, so you attach them with an ide
 
 ```gdscript
 var att := BoneAttachment3D.new()
-att.bone_name = "IteamSlot.R"            # "Torso" for the box
+att.bone_name = "IteamSlot.R"            # "Torso" for the box and radio mic, "IteamSlot.L" for the ticket book
 skeleton.add_child(att)                    # the character's Armature/Skeleton3D
 att.add_child(preload("res://Characters_1_Godot/Props/Umbrella.glb").instantiate())
 ```
@@ -65,6 +79,27 @@ the ground.
 
 `Test/AnimationTest.tscn` attaches all of this automatically: pick an animation and the matching
 prop appears.
+
+**Police:** `Police_Radio` and `Police_Ticket` are made for the `PoliceMan_A`/`PoliceMan_B` models;
+the radio mic is placed on their chest (beside the badge) and may float or sink on other body
+shapes.
+
+**Taxi:** `Props/Taxi.glb` is your PixelClock City `Taxi_5` (from `pixelclock-city-taxis.zip`),
+scaled up 1.25x so the big-headed characters fit inside, with the right rear door cut out and
+hinged, see-through windows and a simple cabin (floor, bench, front seat backs). Add it as a child of
+the character root with an identity transform, like the bicycle, and play its door animation with
+the character's clip:
+
+| Character | Taxi | |
+|---|---|---|
+| `Taxi_Enter` | `Enter` | 5.5 s: opens the door by the handle, walks round it, hops up backwards onto the seat, swings the legs in, pulls the door shut, slides to the middle |
+| `Taxi_Ride` | `Ride` | 4 s loop: seated, swaying with the car, looking out of the window |
+| `Taxi_Exit` | `Exit` | 5.5 s: slides over, pushes the door open, hops down, closes the door from the kerb |
+
+`Taxi_Enter` starts and `Taxi_Exit` ends in the idle stance on the kerb at the character root;
+they chain through `Taxi_Ride`. To drive off, reparent the character to the taxi after
+`Taxi_Enter` (or hide it). Very tall hair or hats (Character_B, the police caps) may brush the
+roof while seated. `tools/taxi.py` does the fitting; change `TAXI_SCALE` or the door outline there.
 
 **Cello:** there is deliberately no animation between carrying and playing. Cut from
 `Cello_Carry_*` to `Cello_Play`/`Cello_Rest` behind a visual transition (a puff, fade or similar),
@@ -140,4 +175,5 @@ python3.11 -m venv .venv && .venv/bin/pip install bpy==4.2.* numpy pillow
 - `tools/props.py`: prop geometry and export
 - `tools/merge_glb.py`: appends animations to the library without touching the originals
 - `tools/check_clearance.py`: umbrella / cello neck vs head clearance check across characters
+- `tools/taxi.py`: fits the PixelClock taxi (scale, door cut-out, windows, cabin)
 - `tools/santa_hat.py`: Santa hat model, per-model fitting (`OVERRIDES` for hand tweaks, skip list)

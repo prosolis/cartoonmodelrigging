@@ -59,7 +59,10 @@ ANIM_PROPS = {
     "Canoe_Paddle-loop": ["Canoe"],
     "Canoe_Rest-loop": ["Canoe"],
     **{name: ["Skate_L", "Skate_R"] for name in ("Skate_Idle-loop", "Skate_Stride-loop", "Skate_Glide-loop",
-                                                 "Skate_Spin-loop", "Skate_Wobble-loop", "Skate_Stop")},
+                                                 "Skate_Spin-loop", "Skate_Wobble-loop", "Skate_Stop", "Skate_Stumble",
+                                                 "Skate_Fall_Forward", "Skate_Fall_Back", "Skate_Fall_Wobble",
+                                                 "Skate_Sit_Ice-loop", "Skate_Kneel_Ice-loop", "Skate_GetUp",
+                                                 "Skate_GetUp_Knees", "Skate_GetUp_Clumsy", "Skate_GetUp_Knees_Clumsy")},
 }
 
 ANIMATED_PROPS = ("Bicycle", "Taxi", "Surfboard", "Kite", "Fishing_Line", "Canoe")  # own animation per clip

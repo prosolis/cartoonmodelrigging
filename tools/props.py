@@ -58,6 +58,8 @@ ANIM_PROPS = {
     "Fish_Cast": ["Rod", "Fishing_Line"],
     "Canoe_Paddle-loop": ["Canoe"],
     "Canoe_Rest-loop": ["Canoe"],
+    **{name: ["Skate_L", "Skate_R"] for name in ("Skate_Idle-loop", "Skate_Stride-loop", "Skate_Glide-loop",
+                                                 "Skate_Spin-loop", "Skate_Wobble-loop", "Skate_Stop")},
 }
 
 ANIMATED_PROPS = ("Bicycle", "Taxi", "Surfboard", "Kite", "Fishing_Line", "Canoe")  # own animation per clip
@@ -116,6 +118,29 @@ CANOE = {
     "bottom_z": -0.13, "floor_z": -0.09, "seat_z": -0.07, "gunwale_z": 0.15, "end_z": 0.30,
     "paddle": 2.2,
 }
+# Ice skates: a strap-on blade under each shoe. Local frame: origin on the sole under the shoe centre,
+# toes toward -Y, up +Z; the blade's lowest point is `lift` below the sole (animations put it on the ice).
+SKATE = {"lift": 0.085, "centre_y": -0.075, "front": -0.215, "heel": 0.18, "top": -0.052, "rocker": 0.008}
+
+
+def blade_bottom(y):
+    """Height of the blade's running edge below the sole at y (skate local): a slight rocker."""
+    return -SKATE["lift"] + SKATE["rocker"] * (y / 0.2) ** 2
+
+
+def _blade_profile():
+    """Side outline of the blade, (y, z) in skate local: the running edge, the toe curl, the top."""
+    sk, low = SKATE, -SKATE["lift"]
+    prof = [(sk["heel"], sk["top"])]
+    prof += [(y, blade_bottom(y)) for y in (rigkit.lerp(sk["heel"], -0.19, i / 10) for i in range(11))]
+    prof += [(-0.204, low + 0.008), (sk["front"], low + 0.019), (sk["front"] + 0.002, low + 0.031),
+             (-0.20, sk["top"] + 0.004), (-0.185, sk["top"])]
+    return prof
+
+
+SKATE_PROFILE = _blade_profile()
+
+
 LINES_JSON = os.path.join(os.path.dirname(__file__), "prop_lines.json")
 
 
@@ -557,6 +582,28 @@ def build_rod(root):
     cylinder_between("Reel_Knob", (0.075, 0.075, 0.08), (0.075, 0.075, 0.11), 0.008, dark, root, 6)
 
 
+def build_skate(root):
+    steel = material("Skate_Blade", (0.82, 0.84, 0.88, 1), 0.2, 1.0)
+    metal = material("Skate_Metal", (0.55, 0.56, 0.60, 1), 0.35, 1.0)
+    plate = material("Skate_Plate", (0.72, 0.12, 0.13, 1), 0.5)
+    top = SKATE["top"]
+    for name, y, w, l in (("Toe", -0.115, 0.11, 0.13), ("Heel", 0.115, 0.09, 0.09)):
+        box(f"Skate_{name}Plate", (w, l, 0.012), (0, y, -0.006), plate, root)
+        box(f"Skate_{name}Post", (0.024, 0.055, -top - 0.008), (0, y, (top - 0.016) / 2), metal, root)
+    # blade: the side profile extruded across x
+    prof, t = SKATE_PROFILE, 0.0045
+    m = len(prof)
+    verts = [(x, y, z) for x in (-t, t) for y, z in prof]
+    faces = [tuple(range(m))[::-1], tuple(range(m, 2 * m))]
+    faces += [(i, (i + 1) % m, m + (i + 1) % m, m + i) for i in range(m)]
+    me = bpy.data.meshes.new("Skate_Blade")
+    me.from_pydata(verts, [], faces)
+    me.update()
+    o = bpy.data.objects.new("Skate_Blade", me)
+    bpy.context.scene.collection.objects.link(o)
+    _finish(o, steel, root)
+
+
 def build_fishing_line(root):
     line_m = material("Fish_LineMat", (0.92, 0.92, 0.88, 1), 0.6)
     red = material("Fish_FloatRed", (0.90, 0.10, 0.08, 1), 0.5)
@@ -694,6 +741,8 @@ BUILDERS = {
     "TicketBook": build_ticket_book,
     "Pen": build_pen,
     "Rod": build_rod,
+    "Skate_L": build_skate,
+    "Skate_R": build_skate,
 }
 TRACKED_BUILDERS = {"Surfboard": build_surfboard, "Kite": build_kite, "Fishing_Line": build_fishing_line,
                     "Canoe": build_canoe}
@@ -782,7 +831,8 @@ def export_all():
     os.makedirs(PROPS_DIR, exist_ok=True)
     offsets = load_offsets()
     for name in ["Box", "Umbrella", "Phone", "Bicycle", "Chair", "Cello_Carried", "Cello_Played", "Bow",
-                 "Radio_Mic", "TicketBook", "Pen", "Taxi", "Surfboard", "Kite", "Rod", "Fishing_Line", "Canoe"]:
+                 "Radio_Mic", "TicketBook", "Pen", "Taxi", "Surfboard", "Kite", "Rod", "Fishing_Line", "Canoe",
+                 "Skate_L", "Skate_R"]:
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o, do_unlink=True)
         root = build(name, animate=name in ANIMATED_PROPS)

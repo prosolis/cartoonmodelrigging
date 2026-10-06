@@ -2492,8 +2492,238 @@ def canoe_rest(ctx, frames):
     return pose
 
 
+# ---------------------------------------------------------------------------
+# Ice skating. The ice is at the character root (z = 0). Each shoe wears a
+# strap-on blade (Props/Skate_L.glb on "Foot.L", Skate_R.glb on "Foot.R");
+# _skate_foot puts the blade's lowest point on the ice. All the clips except
+# the spin are built from one parameter set (_skate_body), so Skate_Stop can
+# blend from the Skate_Glide pose to the Skate_Idle pose. The clips skate in
+# place: move the character yourself (Stride about 2.5 m/s, Glide coasting
+# and slowing, Stop slowing to a halt over its first second).
+from props import SKATE, SKATE_PROFILE, blade_bottom  # noqa: E402
+
+SKATE_REST = {s: V(0.172 * SIDE[s], SKATE["centre_y"], 0.0) for s in "LR"}  # skate origin on the rest pose
+
+
+def _ref_rest(ctx):
+    return ctx.rig.pose()
+
+
+def skate_world(side):
+    return lambda ctx, p: Matrix.Translation(SKATE_REST[side])
+
+
+def _skate_foot(ctx, p, s, x, y, toe_out=0.0, edge=0.0, pitch=0.0, lift=0.0, knee=0.25):
+    """Put a skate's blade (its middle) at (x, y), its lowest point `lift` above the ice.
+
+    toe_out: degrees the toes turn out; edge: degrees rolled onto the inside
+    edge (- = outside edge); pitch: + = toes down."""
+    sx = SIDE[s]
+    q = rot(UP, toe_out * sx) @ rot(FWD, edge * sx) @ rot(LEFT, pitch)
+    a_rest = ctx.rig.rest[f"Foot.{s}"].translation
+
+    def rel(yy, zz):  # skate-local point relative to the ankle, posed
+        return q @ (SKATE_REST[s] + V(0, yy, zz) - a_rest)
+
+    low = min(rel(yy, zz).z for yy, zz in SKATE_PROFILE)
+    c = rel(0.0, blade_bottom(0.0))
+    p.leg_ik(s, V(x * sx - c.x, y - c.y, lift - low), V(knee * sx, -1, 0))
+    p.rest_orient(f"Foot.{s}", q)
+    p.basis[f"Toes.{s}"] = Matrix.Identity(4)
+
+
+def _mix(a, b, t):
+    """Blend two parameter sets (dicts of floats / tuples)."""
+    if isinstance(a, dict):
+        return {k: _mix(a[k], b[k], t) for k in a}
+    if isinstance(a, tuple):
+        return tuple(_mix(u, v, t) for u, v in zip(a, b))
+    return a + (b - a) * t
+
+
+def _keyed_mix(t, keys):
+    """Smooth interpolation through [(t, params), ...]."""
+    if t <= keys[0][0]:
+        return keys[0][1]
+    for (t0, a), (t1, b) in zip(keys, keys[1:]):
+        if t <= t1:
+            return _mix(a, b, smooth((t - t0) / (t1 - t0)))
+    return keys[-1][1]
+
+
+def _add(k, **d):
+    """Copy of params k with offsets added (feet / arms: per-side tuples of offsets)."""
+    out = dict(k)
+    for key, v in d.items():
+        out[key] = tuple(a + b for a, b in zip(k[key], v)) if isinstance(v, tuple) else k[key] + v
+    return out
+
+
+# Feet: (x out from the centre, y, toe_out, edge, pitch, lift, knee out); arms: (out, forward, elbow) in degrees.
+SKATE_IDLE = dict(hx=0.0, hy=0.01, hz=-0.035, pitch=5.0, roll=0.0, yaw=0.0, torso=3.0, torso_yaw=0.0,
+                  head_yaw=0.0, head_pitch=-5.0,
+                  L=(0.15, 0.0, 9.0, 0.0, 0.0, 0.0, 0.35), R=(0.15, 0.0, 9.0, 0.0, 0.0, 0.0, 0.35),
+                  aL=(14.0, 4.0, 18.0), aR=(14.0, 4.0, 18.0))
+SKATE_GLIDE = dict(hx=0.0, hy=0.02, hz=-0.075, pitch=12.0, roll=0.0, yaw=0.0, torso=8.0, torso_yaw=0.0,
+                   head_yaw=0.0, head_pitch=-16.0,
+                   L=(0.12, -0.08, 3.0, 0.0, 0.0, 0.0, 0.25), R=(0.12, 0.06, 3.0, 0.0, 0.0, 0.0, 0.25),
+                   aL=(30.0, 10.0, 24.0), aR=(30.0, 10.0, 24.0))
+SKATE_PLOW = dict(hx=0.0, hy=0.07, hz=-0.12, pitch=16.0, roll=0.0, yaw=0.0, torso=12.0, torso_yaw=0.0,
+                  head_yaw=0.0, head_pitch=-14.0,
+                  L=(0.25, -0.02, -24.0, 20.0, 0.0, 0.0, -0.15), R=(0.25, -0.02, -24.0, 20.0, 0.0, 0.0, -0.15),
+                  aL=(22.0, 38.0, 34.0), aR=(22.0, 38.0, 34.0))
+
+
+def _skate_body(ctx, p, k):
+    """Pose from a parameter set: hips, torso, skates on the ice, arms, head."""
+    hips_to(ctx, p, V(k["hx"], k["hy"], ctx.hips_z + SKATE["lift"] + k["hz"]), pitch=k["pitch"], yaw=k["yaw"],
+            roll=k["roll"])
+    p.rotate("Torso", LEFT, k["torso"])
+    p.rotate("Torso", UP, k["torso_yaw"])
+    for s in "LR":
+        _skate_foot(ctx, p, s, *k[s])
+    relaxed_arms(ctx, p)
+    for s in "LR":
+        out, fwd, elbow = k["a" + s]
+        p.rotate(f"Arm.{s}", FWD, out * SIDE[s])  # (a hanging arm: + FWD swings the left hand out)
+        p.rotate(f"Arm.{s}", LEFT, -fwd)
+        p.rotate(f"ForeArm.{s}", LEFT, -elbow)
+    look(p, yaw=k["head_yaw"], pitch=k["head_pitch"])
+
+
+def skate_idle(ctx, frames):
+    """Standing on skates, knees soft, weight drifting from foot to foot; once a loop
+    the skates slip a little and the arms come out to catch the balance."""
+    def pose(fr):
+        ph = fr / frames
+        sw = math.sin(2 * math.pi * ph)
+        c = math.sin(math.pi * ramp(ph, 0.55, 0.78)) ** 2  # balance catch
+        slip = math.sin(math.pi * ramp(ph, 0.55, 0.70))
+        k = _add(SKATE_IDLE, hx=0.022 * sw, hz=-0.02 * c, pitch=-6 * c, roll=-2.5 * sw, torso=5 * c,
+                 head_yaw=10 * math.sin(4 * math.pi * ph) * (1 - c), head_pitch=8 * c,
+                 L=(0, -0.05 * slip, 0, 4 * c, 0, 0, 0), R=(0, 0.04 * slip, 0, 4 * c, 0, 0, 0),
+                 aL=(26 * c, 8 * c, 12 * c), aR=(30 * c, -4 * c, 14 * c))
+        p = ctx.stand()
+        _skate_body(ctx, p, k)
+        breathe(p, ph * 2)
+        return p
+    return pose
+
+
+def skate_glide(ctx, frames):
+    """Coasting on both skates, arms out a little, leaning into a gentle curve one way then the other."""
+    def pose(fr):
+        ph = fr / frames
+        e = math.sin(2 * math.pi * ph)  # + = curving to the left
+        k = _add(SKATE_GLIDE, hx=0.03 * e, roll=-5 * e, torso_yaw=6 * e, head_yaw=22 * math.sin(2 * math.pi * ph),
+                 L=(0, 0, 4 * e, -7 * e, 0, 0, 0), R=(0, 0, -4 * e, 7 * e, 0, 0, 0),
+                 aL=(-6 * e, 0, 0), aR=(6 * e, 0, 0))
+        p = ctx.stand()
+        _skate_body(ctx, p, k)
+        breathe(p, ph * 3)
+        return p
+    return pose
+
+
+def _stride_foot(t):
+    """One skate through a stride, foot phase t: glide under the body, push out and back, lift, bring it back."""
+    if t < 0.35:  # glide
+        u = t / 0.35
+        return (lerp(0.06, 0.10, u), lerp(-0.06, 0.0, u), 6.0, lerp(-4.0, 0.0, u), 0.0, 0.0, 0.2)
+    if t < 0.6:  # push: out to the side and back, onto the inside edge
+        u = smooth((t - 0.35) / 0.25)
+        return (lerp(0.10, 0.36, u), lerp(0.0, 0.16, u), lerp(6, 38, u), lerp(0, 24, u), 0.0, 0.0, lerp(0.2, 0.7, u))
+    if t < 0.7:  # off the ice, toe down
+        u = smooth((t - 0.6) / 0.1)
+        return (lerp(0.36, 0.33, u), lerp(0.16, 0.18, u), 38.0, lerp(24, 18, u), 25 * u, 0.05 * u, 0.7)
+    u = smooth((t - 0.7) / 0.3)  # recovery: back in under the body and set down
+    return (lerp(0.33, 0.06, u), lerp(0.18, -0.06, u), lerp(38, 6, u), lerp(18, -4, u), 25 * (1 - u),
+            0.05 * (1 - u) + 0.04 * math.sin(math.pi * u), lerp(0.7, 0.2, u))
+
+
+def skate_stride(ctx, frames):
+    """Skating forward: a push to the side with one skate and then the other, the body low and
+    leaning, over the gliding skate, the arms swinging with the pushes."""
+    def pose(fr):
+        ph = fr / frames
+        over = math.cos(2 * math.pi * (ph - 0.2))  # + = over the left skate
+        swing = math.cos(2 * math.pi * (ph - 0.5))  # + = left arm forward (left leg pushing)
+        k = dict(SKATE_IDLE, hx=0.07 * over, hy=0.03, hz=-0.10 + 0.012 * math.cos(4 * math.pi * (ph - 0.1)),
+                 pitch=22.0, roll=-3 * over, yaw=6 * over, torso=12.0, torso_yaw=-8 * over,
+                 head_yaw=-4 * over, head_pitch=-30.0,
+                 L=_stride_foot(ph), R=_stride_foot((ph + 0.5) % 1.0),
+                 aL=(12.0, 38 * swing, 22 + 14 * max(0.0, swing)), aR=(12.0, -38 * swing, 22 + 14 * max(0.0, -swing)))
+        p = ctx.stand()
+        _skate_body(ctx, p, k)
+        return p
+    return pose
+
+
+SPIN_TURNS = 2  # turns per loop
+
+
+def skate_spin(ctx, frames):
+    """A scratch spin on the left skate: the right leg crossed in front, hands together at the chest.
+    The whole body turns about the left skate, counter-clockwise seen from above."""
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        k = dict(SKATE_IDLE, hx=0.0, hy=0.0, hz=-0.02, pitch=2.0, roll=0.0, torso=-2.0, head_pitch=-8.0,
+                 L=(0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.2), R=(0.0, -0.15, -12.0, 0.0, 50.0, 0.06, 0.4))
+        _skate_body(ctx, p, k)
+        f, d = body_frame(p, "Torso")
+        for s in "LR":
+            sx = SIDE[s]
+            arm_to(p, s, f(0.035 * sx, -0.21, 0.24), d(UP + FWD * 0.4 + RIGHT * sx * 0.2), d(RIGHT * sx),
+                   d(V(sx, 0.3, -0.6)))
+        look(p, pitch=-4 + 3 * math.sin(2 * math.pi * ph))
+        _on_float(p, Matrix.Rotation(math.radians(360 * SPIN_TURNS * ph), 4, "Z"))
+        return p
+    return pose
+
+
+def skate_wobble(ctx, frames):
+    """A beginner losing balance: knock-kneed, the skates sliding forward and back,
+    the body tipping, the arms windmilling."""
+    def pose(fr):
+        ph = fr / frames
+        sc = math.sin(2 * math.pi * ph)        # scissor: + = left skate forward
+        tip = math.sin(4 * math.pi * ph + 0.6)  # + = tipping forward
+        k = dict(SKATE_IDLE, hx=0.03 * math.sin(2 * math.pi * ph + 1.2), hy=0.02, hz=-0.09 + 0.015 * tip,
+                 pitch=14 + 12 * tip, roll=4 * sc, yaw=-8 * sc, torso=6 - 10 * tip, torso_yaw=6 * sc,
+                 head_yaw=-6 * sc, head_pitch=18 - 14 * tip,
+                 L=(0.15, -0.11 * sc, 6 - 12 * sc, 12 + 4 * tip, 0.0, 0.0, -0.35),
+                 R=(0.15, 0.11 * sc, 6 + 12 * sc, 12 - 4 * tip, 0.0, 0.0, -0.35))
+        turn = 360 * 3 * ph  # windmill: three forward circles per loop, the arms half a turn apart
+        k["aL"] = (38.0 + 8 * math.sin(math.radians(turn)), turn, 16.0)
+        k["aR"] = (38.0 - 8 * math.sin(math.radians(turn)), turn + 180, 16.0)
+        p = ctx.stand()
+        _skate_body(ctx, p, k)
+        return p
+    return pose
+
+
+SKATE_STOP_FRAMES = 60
+SKATE_STOP_KEYS = [(0, SKATE_GLIDE), (6, SKATE_GLIDE), (18, SKATE_PLOW), (36, SKATE_PLOW), (56, SKATE_IDLE),
+                   (60, SKATE_IDLE)]
+
+
+def skate_stop(ctx, frames):
+    """A snowplough stop: from the Skate_Glide pose the heels push out and the toes turn in, the
+    knees bend and the skates scrape to a halt, then up into the Skate_Idle pose."""
+    def pose(fr):
+        k = dict(_keyed_mix(fr, SKATE_STOP_KEYS))
+        scrape = math.sin(math.pi * ramp(fr, 14, 38))
+        k["hz"] += 0.005 * math.sin(fr * 2.3) * scrape  # judder while the blades scrape
+        k["head_pitch"] += 4 * math.sin(fr * 1.7) * scrape
+        p = ctx.stand()
+        _skate_body(ctx, p, k)
+        return p
+    return pose
+
+
 # Poses used only as references for prop offsets
-REF_POSES = {"_ref_grip": _ref_grip, "_ref_book": _ref_book}
+REF_POSES = {"_ref_grip": _ref_grip, "_ref_book": _ref_book, "_ref_rest": _ref_rest}
 
 
 # Reference frames used to derive prop attachment offsets: name -> (bone, anim, frame, fn)
@@ -2508,6 +2738,8 @@ PROP_REFS = {
     "TicketBook": ("IteamSlot.L", "_ref_book", 0, ticket_book_world),
     "Pen": ("IteamSlot.R", "_ref_grip", 0, pen_world),
     "Rod": ("IteamSlot.R", "_ref_grip", 0, rod_world),
+    "Skate_L": ("Foot.L", "_ref_rest", 0, skate_world("L")),
+    "Skate_R": ("Foot.R", "_ref_rest", 0, skate_world("R")),
 }
 
 
@@ -2567,5 +2799,11 @@ ANIMATIONS = {
     "Fish_Cast": (fish_cast, FISH_CAST_FRAMES, False),
     "Canoe_Paddle-loop": (canoe_paddle, CANOE_PADDLE_FRAMES, True),
     "Canoe_Rest-loop": (canoe_rest, CANOE_REST_FRAMES, True),
+    "Skate_Idle-loop": (skate_idle, 120, True),
+    "Skate_Stride-loop": (skate_stride, 40, True),
+    "Skate_Glide-loop": (skate_glide, 120, True),
+    "Skate_Spin-loop": (skate_spin, 40, True),
+    "Skate_Wobble-loop": (skate_wobble, 72, True),
+    "Skate_Stop": (skate_stop, SKATE_STOP_FRAMES, False),
     **{name: (walk_variant(name), w["cycle"] * w["cycles"], True) for name, w in WALKS.items()},
 }

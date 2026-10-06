@@ -3,7 +3,7 @@
 `Characters_1_Godot/` is the Characters_1 pack for Godot 4 (308 characters sharing one
 21-bone skeleton). The original zip is kept as `Characters_1_Godot.zip`.
 
-This repo adds **60 new animations** to the pack's shared animation library, plus a few
+This repo adds **66 new animations** to the pack's shared animation library, plus a few
 props that go with them. All 47 original animations are untouched.
 
 ![New animations](Characters_1_Godot/Preview_NewAnimations.png)
@@ -33,6 +33,7 @@ that suffix on import (`Wave_B-loop` shows up as `Wave_B`).
 | Kite | `Kite_Fly` (winder in both hands, small tugs, looking up at the kite) | `Props/Kite.glb` at the character root |
 | Fishing | `Fish_Idle` (holding the rod, the odd twitch), `Fish_Cast` (back over the shoulder and out) | `Props/Rod.glb` on `IteamSlot.R` + `Props/Fishing_Line.glb` at the root |
 | Canoe | `Canoe_Paddle` (a stroke on one side, then the other), `Canoe_Rest` (paddle across the knees, looking around) | `Props/Canoe.glb` at the character root (canoe and paddle) |
+| Ice skating | `Skate_Idle` (balancing, the odd slip), `Skate_Stride` (pushing off one skate, then the other), `Skate_Glide` (coasting, curving one way then the other), `Skate_Spin` (a scratch spin on the left skate), `Skate_Wobble` (a beginner, arms windmilling), `Skate_Stop` (a snowplough stop, from `Skate_Glide` into `Skate_Idle`) | `Props/Skate_L.glb` on `Foot.L` + `Props/Skate_R.glb` on `Foot.R` |
 | Walks | `Walk_Brisk`, `Walk_Stroll`, `Walk_Tired`, `Walk_Happy`, `Walk_Sightseeing` (looking up at the buildings) | |
 | Extras | `Talk`, `Clap`, `Cheer`, `Point_A`, `Nod_Yes`, `Shake_No`, `Shrug`, `Dance_A`, `Wait_HandsBehind` | |
 
@@ -56,7 +57,8 @@ Bone props have their offset baked into the file, so you attach them with an ide
 
 ```gdscript
 var att := BoneAttachment3D.new()
-att.bone_name = "IteamSlot.R"            # "Torso" for the box and radio mic, "IteamSlot.L" for the ticket book
+att.bone_name = "IteamSlot.R"            # "Torso" for the box and radio mic, "IteamSlot.L" for the ticket book,
+                                           # "Foot.L" / "Foot.R" for the skates
 skeleton.add_child(att)                    # the character's Armature/Skeleton3D
 att.add_child(preload("res://Characters_1_Godot/Props/Umbrella.glb").instantiate())
 ```
@@ -130,6 +132,18 @@ clip (same length).
   float; the rod (`Rod.glb` on `IteamSlot.R`) can also be used on its own.
 - The bodies vary a lot, so a big belly may touch the board deck and slim characters lie a little
   above it in `Surf_Paddle`; sitting astride, the thighs rest on the rails.
+
+**Ice skating:** the ice is at the character root. Every `Skate_*` clip stands the character
+on the blades, which lifts the feet 8.5 cm off the root, so always attach both skates
+(`Skate_L.glb` on `Foot.L`, `Skate_R.glb` on `Foot.R`). The blade strap-on fits under every
+character's shoe.
+
+- The clips skate in place, so move the character yourself: about 2.5 m/s for `Skate_Stride`,
+  slowing down through `Skate_Glide`, and down to a stop over the first second of `Skate_Stop`.
+  The blades glide, so the speed doesn't have to match exactly.
+- `Skate_Spin` turns the whole body twice per loop (counter-clockwise from above) about the left
+  skate, which stays at the root. The root itself doesn't turn.
+- `Skate_Stop` starts on the `Skate_Glide` pose and ends on the `Skate_Idle` pose.
 
 **Cello:** there is deliberately no animation between carrying and playing. Cut from
 `Cello_Carry_*` to `Cello_Play`/`Cello_Rest` behind a visual transition (a puff, fade or similar),

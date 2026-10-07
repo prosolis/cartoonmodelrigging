@@ -3169,7 +3169,8 @@ def dance_robot(ctx, frames):
 def _floor_body(ctx, p, k):
     """Pose from a parameter set: hips (absolute height), torso, feet, arms (angles, blended
     toward palms planted on the floor), head."""
-    hips_to(ctx, p, V(k["hx"], k["hy"], k["hz"]), pitch=k["pitch"], roll=k.get("roll", 0.0))
+    hips_to(ctx, p, V(k["hx"], k["hy"], k["hz"]), pitch=k["pitch"], yaw=k.get("yaw", 0.0),
+            roll=k.get("roll", 0.0))
     p.rotate("Torso", LEFT, k["torso"])
     for s in "LR":
         x, y, lift, toe_out, heel, toe, kx, ky, kz = k[s]
@@ -3403,6 +3404,61 @@ def dance_dab(ctx, frames):
     return pose
 
 
+# -- Zombie crawl: belly on the floor, clawing forward one arm at a time and dragging the dead
+# legs behind. In place; to travel, move the character forward at ZOMBIE_CRAWL_SPEED m/s (the
+# planted hand then stays put on the floor).
+
+ZOMBIE_CRAWL_FRAMES = 72                     # one pull with each arm
+ZOMBIE_REACH, ZOMBIE_PULL = 0.56, 0.20      # planted hand: this far in front of the shoulder -> this far
+ZOMBIE_CRAWL_SPEED = 2 * (ZOMBIE_REACH - ZOMBIE_PULL) / (ZOMBIE_CRAWL_FRAMES / 30.0)
+# feet: (x, y, lift, toe_out, heel, toe, knee out, forward, up); arms are placed separately
+ZOMBIE_PRONE = dict(hx=0.0, hy=-0.30, hz=0.27, pitch=88.0, torso=-18.0, head_pitch=-52.0,
+                    L=(0.17, 0.33, 0.105, 0.0, 150.0, 150.0, 0.15, 0.0, -1.0),
+                    R=(0.10, 0.27, 0.105, 14.0, 135.0, 150.0, 0.35, 0.0, -1.0),  # the twisted leg
+                    aL=(60.0, 10.0, 10.0), aR=(60.0, 10.0, 10.0))
+
+
+def _crawl_hand(u):
+    """One arm's stroke, u = 0 as the hand claws into the floor at full reach:
+    (distance in front of the shoulder, height above the floor, claw 0..1)."""
+    u %= 1.0
+    if u < 0.5:  # planted, dragging the body up to it
+        v = u / 0.5
+        return lerp(ZOMBIE_REACH, ZOMBIE_PULL, v), 0.0, 1.0 - 0.7 * smooth(v)
+    v = (u - 0.5) / 0.5  # up and slapping down out in front
+    return lerp(ZOMBIE_PULL, ZOMBIE_REACH, smooth(v)), 0.30 * math.sin(math.pi * v ** 0.75), lerp(0.3, 1.0, smooth(v))
+
+
+def zombie_crawl(ctx, frames):
+    base = ctx.stand()
+    _floor_body(ctx, base, ZOMBIE_PRONE)
+    shoulder = {s: base.head(f"Arm.{s}") for s in "LR"}
+
+    def pose(fr):
+        u = fr / frames
+        sw, effort = math.sin(2 * math.pi * u), 0.5 - 0.5 * math.cos(4 * math.pi * u)  # effort: mid-pull
+        k = dict(ZOMBIE_PRONE, hy=ZOMBIE_PRONE["hy"] - 0.02 * (effort - 0.5), hz=ZOMBIE_PRONE["hz"] + 0.015 * effort,
+                 yaw=7.0 * sw, roll=-6.0 * sw, torso=ZOMBIE_PRONE["torso"] - 8.0 * effort,
+                 head_pitch=ZOMBIE_PRONE["head_pitch"] + 6.0 * effort, head_yaw=-6.0 * sw,
+                 head_roll=9.0 * math.sin(2 * math.pi * u + 0.7) + 2.5 * math.sin(14 * math.pi * u))
+        for s in "LR":  # the legs swing behind like a tail
+            x, y, *rest = k[s]
+            k[s] = (x - 0.03 * sw * SIDE[s], y, *rest)
+        p = ctx.stand()
+        _floor_body(ctx, p, k)
+        for s in "LR":
+            sx = SIDE[s]
+            ahead, lift, claw = _crawl_hand(u + (0.0 if s == "L" else 0.5))
+            a = math.radians(lerp(12.0, 62.0, claw))  # wrist bent down: fingertips dig in
+            fingers, palm_n = V(0.0, -math.cos(a), -math.sin(a)), V(0.0, math.sin(a), -math.cos(a))
+            z = max(0.045, 0.03 + 0.11 * math.sin(a)) + lift
+            palm = V(0.29 * sx, shoulder[s].y - ahead, z)
+            elbow = V(0.8 * sx, 0.3, 0.8) if lift == 0 else V(0.6 * sx, 0.1, 0.9)
+            arm_to(p, s, palm, fingers, palm_n, elbow)
+        return p
+    return pose
+
+
 # Poses used only as references for prop offsets
 REF_POSES = {"_ref_grip": _ref_grip, "_ref_book": _ref_book, "_ref_rest": _ref_rest}
 
@@ -3507,5 +3563,6 @@ ANIMATIONS = {
     "Dance_Twist-loop": (dance_twist, 4 * BEAT, True),
     "Dance_CabbagePatch-loop": (dance_cabbage_patch, 4 * BEAT, True),
     "Dance_Dab": (dance_dab, 3 * BEAT, False),
+    "Zombie_Crawl-loop": (zombie_crawl, ZOMBIE_CRAWL_FRAMES, True),
     **{name: (walk_variant(name), w["cycle"] * w["cycles"], True) for name, w in WALKS.items()},
 }

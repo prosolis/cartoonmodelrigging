@@ -3,7 +3,7 @@
 `Characters_1_Godot/` is the Characters_1 pack for Godot 4 (308 characters sharing one
 21-bone skeleton). The original zip is kept as `Characters_1_Godot.zip`.
 
-This repo adds **76 new animations** to the pack's shared animation library, plus a few
+This repo adds **86 new animations** to the pack's shared animation library, plus a few
 props that go with them. All 47 original animations are untouched.
 
 ![New animations](Characters_1_Godot/Preview_NewAnimations.png)
@@ -35,6 +35,7 @@ that suffix on import (`Wave_B-loop` shows up as `Wave_B`).
 | Canoe | `Canoe_Paddle` (a stroke on one side, then the other), `Canoe_Rest` (paddle across the knees, looking around) | `Props/Canoe.glb` at the character root (canoe and paddle) |
 | Ice skating | `Skate_Idle` (balancing, the odd slip), `Skate_Stride` (pushing off one skate, then the other), `Skate_Glide` (coasting, curving one way then the other), `Skate_Spin` (a scratch spin on the left skate), `Skate_Wobble` (a beginner, arms windmilling), `Skate_Stop` (a snowplough stop, from `Skate_Glide` into `Skate_Idle`) | `Props/Skate_L.glb` on `Foot.L` + `Props/Skate_R.glb` on `Foot.R` |
 | Falling on the ice | `Skate_Stumble` (catches a toe and recovers), `Skate_Fall_Forward` (onto hands and knees), `Skate_Fall_Back` (onto the bottom), `Skate_Fall_Wobble` (a beginner's wobble that ends on the bottom), `Skate_Sit_Ice`, `Skate_Kneel_Ice`, `Skate_GetUp`, `Skate_GetUp_Knees`, `Skate_GetUp_Clumsy`, `Skate_GetUp_Knees_Clumsy` | the skates, as above |
+| Dances | `Dance_RunningMan`, `Dance_Robot` (stiff poses that snap on the beat), `Dance_Moonwalk`, `Dance_Disco` (the point up and down across), `Dance_Twist`, `Dance_CabbagePatch`, `Dance_Dab` (once), `Dance_Worm_Down` → `Dance_Worm` → `Dance_Worm_Up` | |
 | Walks | `Walk_Brisk`, `Walk_Stroll`, `Walk_Tired`, `Walk_Happy`, `Walk_Sightseeing` (looking up at the buildings) | |
 | Extras | `Talk`, `Clap`, `Cheer`, `Point_A`, `Nod_Yes`, `Shake_No`, `Shrug`, `Dance_A`, `Wait_HandsBehind` | |
 
@@ -166,6 +167,21 @@ chain without blending:
 - `Skate_Sit_Ice` and `Skate_Kneel_Ice` can be skipped: each fall ends on the pose its get-up
   starts on.
 - Bodies vary: a big belly can brush the ice on hands and knees.
+
+**Dances:** every dance is on a 120 BPM grid (one beat = 0.5 s = 15 frames), so they stay in
+time with a 120 BPM track and can be switched on a beat. The loops are 1, 2 or 4 s long
+(2, 4 or 8 beats) and dance in place.
+
+- The worm goes down to the floor and back up in separate clips:
+  `Dance_Worm_Down` → `Dance_Worm` (as many loops as you like) → `Dance_Worm_Up`. `Dance_Worm_Down`
+  starts on the idle pose and `Dance_Worm_Up` ends on it, and the joins match exactly. Lying down,
+  the body is about 0.45 m in front of the root, so the feet stay where they stood.
+- `Dance_Moonwalk` slides in place. To travel backwards, move the character back at about
+  0.48 m/s; the foot up on its toes then stays put on the floor while the flat one slides.
+- `Dance_Dab` dips, snaps into the dab, holds it for a beat and returns to idle (1.5 s); it starts and ends on the idle pose.
+- There is no floss: these arms are too short for it. The arm crossing behind the body would have
+  to reach past the far hip, about 0.1 m further than the arm can reach, so it would pass through
+  the body when it swaps from behind to the front.
 
 **Cello:** there is deliberately no animation between carrying and playing. Cut from
 `Cello_Carry_*` to `Cello_Play`/`Cello_Rest` behind a visual transition (a puff, fade or similar),

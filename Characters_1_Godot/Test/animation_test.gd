@@ -50,6 +50,7 @@ const PROPS := {
 	"Kite_Fly": [["Props/Kite.glb", ""]],
 	"Fish_": [["Props/Rod.glb", "IteamSlot.R"], ["Props/Fishing_Line.glb", ""]],
 	"Canoe_": [["Props/Canoe.glb", ""]],
+	"Skate_": [["Props/Skate_L.glb", "Foot.L"], ["Props/Skate_R.glb", "Foot.R"]],
 }
 
 var pack_dir := ""

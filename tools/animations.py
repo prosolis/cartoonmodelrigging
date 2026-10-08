@@ -3459,6 +3459,82 @@ def zombie_crawl(ctx, frames):
     return pose
 
 
+# ---------------------------------------------------------------------------
+# Squeezing past people: turned sideways (chest toward the people on one side),
+# making themselves narrow, shuffling along with step-together side steps. The
+# travel direction is still the root's forward (-Y), so it swaps in for a walk;
+# move the character at squeeze_speed() m/s. _L faces the character's left
+# (+X, the right foot leads), _R faces its right (the left foot leads).
+
+SQUEEZE_CYCLE = 26     # frames per step-together
+SQUEEZE_STEP = 0.20    # ground covered per step-together (m)
+SQUEEZE_DUTY = 0.6
+SQUEEZE_TURN = 80.0    # degrees the body turns from the travel direction
+SQUEEZE_GAP = 0.32     # distance between the feet, sideways, at rest
+
+
+def squeeze_speed():
+    return SQUEEZE_STEP / (SQUEEZE_DUTY * SQUEEZE_CYCLE / 30.0)
+
+
+def _squeeze_foot(t):
+    """(y offset, lift, heel) of one foot at foot phase t (0 = it lands); +y is behind (the travel is -Y)."""
+    t %= 1.0
+    d = SQUEEZE_STEP
+    if t < SQUEEZE_DUTY:  # planted: the floor slides back under it
+        k = t / SQUEEZE_DUTY
+        return lerp(-d / 2, d / 2, k), 0.0, 10.0 + 12.0 * ramp(k, 0.6, 1.0)
+    k = (t - SQUEEZE_DUTY) / (1 - SQUEEZE_DUTY)
+    return lerp(d / 2, -d / 2, smooth(k)), 0.055 * math.sin(math.pi * k), lerp(22.0, 10.0, smooth(k))
+
+
+def squeeze_past(face):
+    F = 1.0 if face == "L" else -1.0
+    lead, trail = ("R", "L") if F > 0 else ("L", "R")
+
+    def build(ctx, frames):
+        def pose(fr):
+            u = fr / frames
+            ph = (fr % SQUEEZE_CYCLE) / SQUEEZE_CYCLE  # the leading foot lands at 0
+            step = math.sin(2 * math.pi * ph)
+            yaw = F * SQUEEZE_TURN + 3.0 * step
+            r = _yaw_m(yaw)
+            fwd, left = r @ FWD, r @ LEFT  # the body's forward and left
+            p = ctx.stand()
+            balls = {}
+            for s in "LR":
+                y, lift, heel = _squeeze_foot(ph + (0.0 if s == lead else 0.5))
+                balls[s] = (fwd * 0.07 + left * (SQUEEZE_GAP / 2 * SIDE[s]) + V(0, y, 0), lift, heel)
+            sep = abs(balls["L"][0].y - balls["R"][0].y)
+            wide = ramp(sep, 0.15, 0.49)
+            mid = (balls["L"][0] + balls["R"][0]) * 0.5 - fwd * 0.07
+            hips_to(ctx, p, V(mid.x, mid.y, ctx.hips_z - 0.005 - 0.045 * wide), yaw=yaw)
+            p.rotate("Torso", r @ LEFT, -4.0)                 # chest up, tummy in
+            p.rotate("Torso", r @ FWD, 3.0 * step * F)
+            for s in "LR":
+                b, lift, heel = balls[s]
+                sx = SIDE[s]
+                knee = r @ V(0.25 * sx, -1.0, 0.0)
+                _shoe(ctx, p, s, b.x * sx, b.y, lift, (yaw + 8.0 * sx) * sx, heel, 0.0,
+                      knee=(knee.x * sx, knee.y, knee.z))
+            f, d = body_frame(p)
+            lx, tx = SIDE[lead], SIDE[trail]
+            bob = 0.012 * step
+            # leading hand up in front of the chest, palm out: "sorry, excuse me"
+            arm_to(p, lead, f(0.21 * lx, -0.30, 0.17 + bob), d(V(0.3 * lx, -0.2, 1.0)),
+                   d(V(0.8 * lx, -0.7, 0.0)), d(V(0.8 * lx, 0.2, -1.0)))
+            # the other hand held flat against the chest, elbow tucked in
+            arm_to(p, trail, f(0.02 * tx, -0.25, 0.08 - bob), d(V(-tx, -0.1, 0.25)),
+                   d(V(0.0, 1.0, 0.0)), d(V(0.5 * tx, 0.2, -1.0)))
+            # mostly looking where they're going, with a glance and a nod at the people in front
+            glance = math.sin(math.pi * ramp(u, 0.45, 0.85))
+            nod = math.sin(math.pi * ramp(u, 0.55, 0.75))
+            _look_yawed(p, r, yaw=-F * (52.0 - 48.0 * glance), pitch=4.0 + 9.0 * nod, roll=-F * 6.0 * glance)
+            return p
+        return pose
+    return build
+
+
 # Poses used only as references for prop offsets
 REF_POSES = {"_ref_grip": _ref_grip, "_ref_book": _ref_book, "_ref_rest": _ref_rest}
 
@@ -3564,5 +3640,7 @@ ANIMATIONS = {
     "Dance_CabbagePatch-loop": (dance_cabbage_patch, 4 * BEAT, True),
     "Dance_Dab": (dance_dab, 3 * BEAT, False),
     "Zombie_Crawl-loop": (zombie_crawl, ZOMBIE_CRAWL_FRAMES, True),
+    "Squeeze_Past_L-loop": (squeeze_past("L"), 2 * SQUEEZE_CYCLE, True),
+    "Squeeze_Past_R-loop": (squeeze_past("R"), 2 * SQUEEZE_CYCLE, True),
     **{name: (walk_variant(name), w["cycle"] * w["cycles"], True) for name, w in WALKS.items()},
 }

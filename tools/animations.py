@@ -3535,6 +3535,146 @@ def squeeze_past(face):
     return build
 
 
+# ---------------------------------------------------------------------------
+# A hug between two people, for cheering up someone sad. Hug_Give and
+# Hug_Receive are a pair: start them together with the two roots facing each
+# other HUG_DISTANCE apart. Both step in with the right foot and hug the same
+# way (right arm high over the other's left shoulder, left hand low on their
+# right side, heads side by side to each one's right), then hold each other at
+# arm's length and step back to the root. Hug_Receive starts from the
+# Sad_Idle pose and ends standing tall, ready for Walk_Happy.
+#
+# The pair is authored in one character's armature space with the partner
+# mirrored: a point (x, y, z) on me is at (-x, -HUG_DISTANCE - y, z) on them.
+
+HUG_DISTANCE = 1.0
+HUG_FRAMES = 180
+
+HUG_REST = dict(step_r=0.0, lift_r=0.0, step_l=0.0, lift_l=0.0, fwd=0.0, side=0.0, drop=0.0, lean=0.0, troll=0.0,
+                slump=0.0, chest=0.0, head_pitch=0.0, head_yaw=0.0, head_roll=0.0,
+                a_down=1.0, a_open=0.0, a_hug=0.0, a_hold=0.0)
+HUG_SAD = dict(HUG_REST, lean=7.0, slump=1.0, head_pitch=30.0, head_roll=-4.0, drop=0.015)
+HUG_OPEN = dict(HUG_REST, a_down=0.0, a_open=1.0, head_pitch=6.0, head_roll=-8.0, chest=2.0)
+HUG_STEP_R = dict(HUG_OPEN, step_r=0.15, lift_r=0.07, fwd=0.09, side=0.02, lean=3.0)
+HUG_STEP_L = dict(HUG_OPEN, step_r=0.30, step_l=0.12, lift_l=0.07, fwd=0.12, side=0.08, lean=3.0, a_open=0.8,
+                  a_hug=0.2, head_roll=10.0, head_yaw=-18.0)
+HUG_IN = dict(HUG_REST, step_r=0.30, step_l=0.20, fwd=0.26, side=0.09, drop=0.02, lean=10.0, head_pitch=4.0,
+              head_yaw=-22.0, head_roll=14.0, a_down=0.0, a_hug=1.0)
+HUG_HOLD = dict(HUG_IN, fwd=0.10, side=0.0, drop=0.01, lean=-4.0, head_pitch=0.0, head_yaw=0.0, head_roll=0.0,
+                a_hug=0.0, a_hold=1.0)
+HUG_BACK_L = dict(HUG_REST, step_r=0.30, step_l=0.08, lift_l=0.06, fwd=0.14, a_down=0.6, a_hold=0.4)
+HUG_BACK_R = dict(HUG_REST, step_r=0.12, lift_r=0.06, fwd=0.05)
+HUG_HAPPY = dict(HUG_REST, chest=3.0, head_pitch=-4.0)
+_HUG_SAD_IN = dict(HUG_IN, slump=0.6)
+
+HUG_GIVE_KEYS = [(0, HUG_REST), (6, HUG_REST), (20, HUG_OPEN), (30, HUG_STEP_R), (40, HUG_STEP_L), (50, HUG_IN),
+                 (122, HUG_IN), (134, HUG_HOLD), (148, HUG_HOLD), (157, HUG_BACK_L), (166, HUG_BACK_R),
+                 (174, HUG_REST), (180, HUG_REST)]
+HUG_RECEIVE_KEYS = [(0, HUG_SAD), (8, HUG_SAD), (24, dict(HUG_SAD, head_pitch=10.0, head_roll=6.0)),
+                    (30, dict(HUG_STEP_R, slump=0.8, head_pitch=8.0, a_open=0.2, a_down=0.8, head_roll=0.0)),
+                    (40, dict(HUG_STEP_L, slump=0.7, a_open=0.1, a_hug=0.3, a_down=0.6)),
+                    (50, dict(_HUG_SAD_IN, a_hug=0.6, a_down=0.4)), (60, _HUG_SAD_IN),
+                    (110, dict(HUG_IN, slump=0.0)), (122, HUG_IN), (134, HUG_HOLD), (148, HUG_HOLD),
+                    (157, dict(HUG_BACK_L, chest=1.5)), (166, dict(HUG_BACK_R, chest=3.0)),
+                    (174, HUG_HAPPY), (180, HUG_HAPPY)]
+
+
+def _partner(v):
+    """A point on me -> the same point on the partner, in my space."""
+    return V(-v.x, -HUG_DISTANCE - v.y, v.z)
+
+
+def _partner_dir(v):
+    return V(-v.x, -v.y, v.z)
+
+
+def _hug_arms(p, k, pat=0.0):
+    """Blend the hand targets of the arm modes (down, open, hug, hold) by their weights."""
+    f, d = body_frame(p)
+    w = [k["a_down"], k["a_open"], k["a_hug"], k["a_hold"]]
+    tot = sum(w) or 1.0
+    w = [x / tot for x in w]
+    for s in "LR":
+        sx = SIDE[s]
+        modes = [
+            (f(0.31 * sx, -0.07, -0.30), d(V(0.1 * sx, -0.1, -1)), d(V(-sx, 0.1, 0)), d(V(0.3 * sx, 0.7, -1))),
+            (f(0.50 * sx, -0.30, 0.08), d(V(0.6 * sx, -0.6, 0.3)), d(V(-0.4 * sx, -1, 0.2)), d(V(sx, 0.2, -0.6))),
+        ]
+        if s == "R":  # high: over the partner's left shoulder, onto their shoulder blade
+            modes.append((_partner(f(0.17, 0.10, 0.30)), _partner_dir(d(V(-1, 0.2, -0.5))),
+                          _partner_dir(d(V(0, -1, -0.5))), d(V(-0.9, -0.2, 0.5))))
+        else:  # low: round the partner's right side
+            modes.append((_partner(f(-0.24, 0.10, 0.05)), _partner_dir(d(V(1, 0.4, -0.1))),
+                          _partner_dir(d(V(0.8, -0.6, 0))), d(V(0.9, -0.1, -0.5))))
+        modes.append((_partner(f(0.33 * sx, -0.02, 0.04)), _partner_dir(d(V(0, 1, -0.3))),
+                      _partner_dir(d(V(-sx, 0, 0))), d(V(0.6 * sx, 0.3, -1))))
+        palm, fing, nrm, elb = V(0, 0, 0), V(0, 0, 0), V(0, 0, 0), V(0, 0, 0)
+        for wi, (a, b, c, e) in zip(w, modes):
+            palm, fing, nrm, elb = palm + a * wi, fing + b * wi, nrm + c * wi, elb + e * wi
+        if s == "R" and pat:  # pat their back: the hand lifts off and comes down again
+            palm = palm - nrm.normalized() * 0.06 * pat
+        arm_to(p, s, palm, fing, nrm, elb)
+
+
+def _hug_body(ctx, p, k, sway=0.0):
+    """Standing, the right foot `step` forward, hips moved forward and to the right, leaning in."""
+    hips_to(ctx, p, V(-k["side"], -k["fwd"], ctx.hips_z - 0.01 - k["drop"]), roll=-1.5 * sway)
+    p.rotate("Torso", LEFT, k["lean"] + 3.0 * k["slump"] - k["chest"])
+    p.rotate("Torso", FWD, k["troll"] + 3.0 * sway)
+    for s in "LR":
+        p.rotate(f"Shoulder.{s}", LEFT, 9.0 * k["slump"])
+    for s in "LR":  # side: the right foot moves out with the hips
+        x = 0.20 + (k["side"] if s == "R" else 0.0)
+        lift = k[f"lift_{s.lower()}"]
+        _shoe(ctx, p, s, x, -0.10 - k[f"step_{s.lower()}"], lift, 8.0, 12.0 * lift / 0.07, knee=(0.25, -1.0, 0.0))
+
+
+def _hug_clip(keys, giver):
+    def build(ctx, frames):
+        def pose(fr):
+            k = _keyed_mix(fr, keys)
+            hugging = ramp(fr, 50, 60) * (1 - ramp(fr, 114, 122))
+            sway = hugging * math.sin(2 * math.pi * (fr - 50) / 36.0)
+            p = ctx.stand()
+            _hug_body(ctx, p, k, sway)
+            pat = 0.0
+            if giver:
+                for t0 in (68, 80, 92):
+                    pat = max(pat, math.sin(math.pi * clamp((fr - t0) / 8.0)))
+            _hug_arms(p, k, pat)
+            pitch, roll = k["head_pitch"], k["head_roll"] + 2.0 * sway
+            if not giver:  # nuzzle in during the hug; nod "thank you" holding arms
+                roll += 4.0 * hugging * math.sin(math.pi * ramp(fr, 70, 106))
+                pitch += 12.0 * math.sin(math.pi * ramp(fr, 136, 146))
+            else:  # "you're OK?" nod while holding
+                pitch += 8.0 * math.sin(math.pi * ramp(fr, 130, 140))
+            look(p, yaw=k["head_yaw"], pitch=pitch, roll=roll)
+            if not giver:  # a deep breath in the hug, a little bounce at the end
+                breathe(p, fr / 60.0, 1.0 + 1.5 * hugging)
+                hop = math.sin(math.pi * ramp(fr, 166, 176))
+                if hop:
+                    p.translate("Hips", V(0, 0, 0.02 * hop))
+            return p
+        return pose
+    return build
+
+
+def sad_idle(ctx, frames):
+    """Standing slumped, head down: a long sigh each loop, eyes drifting to one side and back."""
+    def pose(fr):
+        u = fr / frames
+        sigh = math.sin(math.pi * ramp(u, 0.2, 0.6)) ** 2
+        k = dict(HUG_SAD, slump=1.0 - 0.25 * sigh, head_pitch=30.0 - 8.0 * sigh)
+        p = ctx.stand()
+        _hug_body(ctx, p, k, sway=0.4 * math.sin(2 * math.pi * u))
+        _hug_arms(p, k)
+        look(p, yaw=10.0 * math.sin(math.pi * ramp(u, 0.6, 0.95)), pitch=k["head_pitch"],
+             roll=k["head_roll"] + 3.0 * sigh)
+        breathe(p, u, 1.0 + 2.0 * sigh)
+        return p
+    return pose
+
+
 # Poses used only as references for prop offsets
 REF_POSES = {"_ref_grip": _ref_grip, "_ref_book": _ref_book, "_ref_rest": _ref_rest}
 
@@ -3642,5 +3782,8 @@ ANIMATIONS = {
     "Zombie_Crawl-loop": (zombie_crawl, ZOMBIE_CRAWL_FRAMES, True),
     "Squeeze_Past_L-loop": (squeeze_past("L"), 2 * SQUEEZE_CYCLE, True),
     "Squeeze_Past_R-loop": (squeeze_past("R"), 2 * SQUEEZE_CYCLE, True),
+    "Sad_Idle-loop": (sad_idle, 120, True),
+    "Hug_Give": (_hug_clip(HUG_GIVE_KEYS, True), HUG_FRAMES, False),
+    "Hug_Receive": (_hug_clip(HUG_RECEIVE_KEYS, False), HUG_FRAMES, False),
     **{name: (walk_variant(name), w["cycle"] * w["cycles"], True) for name, w in WALKS.items()},
 }

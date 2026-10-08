@@ -3,7 +3,7 @@
 `Characters_1_Godot/` is the Characters_1 pack for Godot 4 (308 characters sharing one
 21-bone skeleton). The original zip is kept as `Characters_1_Godot.zip`.
 
-This repo adds **87 new animations** to the pack's shared animation library, plus a few
+This repo adds **89 new animations** to the pack's shared animation library, plus a few
 props that go with them. All 47 original animations are untouched.
 
 ![New animations](Characters_1_Godot/Preview_NewAnimations.png)
@@ -37,7 +37,7 @@ that suffix on import (`Wave_B-loop` shows up as `Wave_B`).
 | Falling on the ice | `Skate_Stumble` (catches a toe and recovers), `Skate_Fall_Forward` (onto hands and knees), `Skate_Fall_Back` (onto the bottom), `Skate_Fall_Wobble` (a beginner's wobble that ends on the bottom), `Skate_Sit_Ice`, `Skate_Kneel_Ice`, `Skate_GetUp`, `Skate_GetUp_Knees`, `Skate_GetUp_Clumsy`, `Skate_GetUp_Knees_Clumsy` | the skates, as above |
 | Dances | `Dance_RunningMan`, `Dance_Robot` (stiff poses that snap on the beat), `Dance_Moonwalk`, `Dance_Disco` (the point up and down across), `Dance_Twist`, `Dance_CabbagePatch`, `Dance_Dab` (once), `Dance_Worm_Down` → `Dance_Worm` → `Dance_Worm_Up` | |
 | Zombie | `Zombie_Crawl` (belly on the floor, clawing forward one arm at a time, legs dragging) | |
-| Walks | `Walk_Brisk`, `Walk_Stroll`, `Walk_Tired`, `Walk_Happy`, `Walk_Sightseeing` (looking up at the buildings) | |
+| Walks | `Walk_Brisk`, `Walk_Stroll`, `Walk_Tired`, `Walk_Happy`, `Walk_Sightseeing` (looking up at the buildings), `Squeeze_Past_L` / `Squeeze_Past_R` (turned sideways, side-stepping between people in a crowd) | |
 | Extras | `Talk`, `Clap`, `Cheer`, `Point_A`, `Nod_Yes`, `Shake_No`, `Shrug`, `Dance_A`, `Wait_HandsBehind` | |
 
 The walking prop variants (`Carry_Box_Walk`, `Umbrella_Walk`, `Phone_Walk`, `Cello_Carry_Walk`)
@@ -53,6 +53,14 @@ character at this speed so the planted foot doesn't slide:
 | `Walk_Tired` | 1.47 s | 0.39 m/s |
 | `Walk_Happy` | 0.87 s (clip has 2 cycles) | 0.96 m/s |
 | `Walk_Sightseeing` | 1.13 s (clip has 4 cycles) | 0.68 m/s |
+| `Squeeze_Past_L`, `Squeeze_Past_R` | 0.87 s (clip has 2 cycles) | 0.38 m/s |
+
+`Squeeze_Past_L` and `Squeeze_Past_R` are for squeezing between people. The character turns about
+80° sideways and shuffles along with side steps, leading with one foot and bringing the other in
+after it. One hand is raised in front of the chest ("excuse me"), the other is held to the chest,
+and once a loop they glance at the people in front and nod. The travel direction is still the
+root's forward, so you can swap them in for a walk without turning the character: `_L` turns to
+face the character's left, `_R` its right. Pick the side the people are on.
 
 ## Using the props in Godot
 

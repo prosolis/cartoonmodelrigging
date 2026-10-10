@@ -3675,6 +3675,244 @@ def sad_idle(ctx, frames):
     return pose
 
 
+# ---------------------------------------------------------------------------
+# Stretches. Each clip starts and ends standing relaxed, so it can be played
+# from an idle and back. All of them are keyed on one parameter set
+# (STRETCH_REST): hips offset and rotation, torso and head angles, shoulder
+# shrugs, the feet (_shoe placement, plus `fold` to pull the foot up behind
+# for the quad stretch) and a hand target for each arm.
+#
+# The heads are wider than the shoulders and come down to about chin = shoulder
+# height, so hands never go straight overhead (they reach up and out in a V)
+# and an arm across the body goes across the chest, under the chin.
+#
+# Arm tuples are in the arm's own side coordinates (x out from the centre, so
+# the same tuple works for both arms): palm centre (3), finger direction (3),
+# palm normal (3), elbow direction (3). They are torso-relative (body_frame);
+# sp_L / sp_R = (world, foot, hips) weights move them to armature space, to
+# the same side's ankle, or to the hips frame instead.
+
+ARM_DOWN = (0.31, -0.07, -0.30, 0.1, -0.1, -1.0, -1.0, 0.1, 0.0, 0.3, 0.7, -1.0)
+ARM_RAISE = (0.30, -0.40, 0.42, 0.1, -0.5, 1.0, -1.0, 0.0, 0.0, 1.0, 0.3, -0.6)   # hands up in front
+ARM_V = (0.64, -0.06, 0.80, 0.6, -0.1, 0.8, -0.3, -1.0, 0.1, 1.0, 0.6, -0.4)      # up and out
+ARM_T = (0.84, -0.06, 0.30, 1.0, 0.0, 0.05, 0.0, -0.3, -1.0, 0.0, 0.6, -1.0)      # out to the side
+ARM_UP = (0.48, -0.05, 0.90, 0.35, -0.1, 1.0, -1.0, -0.2, 0.0, 1.0, 0.4, -0.3)    # side bend: straight up the torso
+ARM_HIP = (0.255, 0.01, -0.10, -0.3, -0.5, -1.0, -1.0, 0.2, 0.0, 1.0, 0.5, 0.1)   # hand on the hip
+FOOT = (0.20, -0.10, 0.0, 0.0, 8.0, 0.0)  # (x out, y, lift, heel, toe out, fold)
+
+STRETCH_REST = dict(hx=0.0, hy=0.0, hz=0.0, pitch=0.0, roll=0.0, yaw=0.0, tpitch=0.0, troll=0.0, tyaw=0.0,
+                    head_pitch=0.0, head_yaw=0.0, head_roll=0.0, sh_L=0.0, sh_R=0.0,
+                    f_L=FOOT, f_R=FOOT, a_L=ARM_DOWN, a_R=ARM_DOWN, sp_L=(0.0, 0.0, 0.0), sp_R=(0.0, 0.0, 0.0))
+
+
+def _st(base=STRETCH_REST, **kw):
+    return dict(base, **kw)
+
+
+def _st_arm(a, x=None, y=None, z=None):
+    """Arm tuple with the palm moved."""
+    return (a[0] if x is None else x, a[1] if y is None else y, a[2] if z is None else z) + tuple(a[3:])
+
+
+def _st_mirror(k):
+    """The same key done to the other side."""
+    m = dict(k)
+    for key in ("hx", "roll", "yaw", "troll", "tyaw", "head_yaw", "head_roll"):
+        m[key] = -k[key]
+    for a, b in (("sh_L", "sh_R"), ("f_L", "f_R"), ("a_L", "a_R"), ("sp_L", "sp_R")):
+        m[a], m[b] = k[b], k[a]
+    return m
+
+
+def _fold_leg(ctx, p, s):
+    """Quad stretch: thigh down, the shin folded up behind it, the foot pointing back and up."""
+    sx = SIDE[s]
+    ankle = p.head(f"UpperLeg.{s}") + V(0.01 * sx, 0.10, -0.03)
+    p.leg_ik(s, ankle, V(0.0, -0.35, -1.0))
+    p.rest_orient(f"Foot.{s}", rot(LEFT, -125.0))
+    p.basis[f"Toes.{s}"] = Matrix.Identity(4)
+
+
+def _stretch_body(ctx, p, k):
+    hips_to(ctx, p, V(k["hx"], k["hy"], ctx.hips_z - 0.01 + k["hz"]), pitch=k["pitch"], roll=k["roll"],
+            yaw=k["yaw"])
+    p.rotate("Torso", LEFT, k["tpitch"])
+    p.rotate("Torso", FWD, k["troll"])
+    p.rotate("Torso", UP, k["tyaw"])
+    for s in "LR":
+        p.rotate(f"Shoulder.{s}", BACK, -k[f"sh_{s}"] * SIDE[s])
+    for s in "LR":
+        x, y, lift, heel, toe_out, fold = k[f"f_{s}"]
+        _shoe(ctx, p, s, x, y, lift, toe_out, heel, knee=(0.25, -1.0, 0.0))
+        if fold > 0.0:
+            folded = p.copy()
+            _fold_leg(ctx, folded, s)
+            blend_bones(p, folded, fold, LEG[s])
+
+
+def _stretch_arms(p, k):
+    f, d = body_frame(p)
+    fh, dh = body_frame(p, "Hips")
+    for s in "LR":
+        sx = SIDE[s]
+        a = k[f"a_{s}"]
+        vs = [V(a[i] * sx, a[i + 1], a[i + 2]) for i in (0, 3, 6, 9)]
+        w_world, w_foot, w_hips = k[f"sp_{s}"]
+        w_torso = 1.0 - w_world - w_foot - w_hips
+        palm = f(*vs[0]) * w_torso + vs[0] * w_world + (p.head(f"Foot.{s}") + vs[0]) * w_foot + fh(*vs[0]) * w_hips
+        dirs = [d(v) * w_torso + v.normalized() * (w_world + w_foot) + dh(v) * w_hips for v in vs[1:]]
+        arm_to(p, s, palm, *dirs)
+
+
+def _stretch_clip(keys, extra=None):
+    """Clip from (frame, params) keys; extra(fr, k) may return offsets to add to the params."""
+    def build(ctx, frames):
+        def pose(fr):
+            k = _keyed_mix(fr, keys)
+            if extra:
+                k = _add(k, **extra(fr, k))
+            p = ctx.stand()
+            _stretch_body(ctx, p, k)
+            _stretch_arms(p, k)
+            look(p, yaw=k["head_yaw"], pitch=k["head_pitch"], roll=k["head_roll"])
+            breathe(p, fr / 60.0)
+            return p
+        return pose
+    return build
+
+
+def _pulse(fr, f0, f1, n):
+    """n smooth pulses (0..1..0) between frames f0 and f1."""
+    if not f0 < fr < f1:
+        return 0.0
+    return math.sin(math.pi * n * (fr - f0) / (f1 - f0)) ** 2
+
+
+# -- Overhead: hands up in front, then up and out in a big V, up on the toes, leaning back a little and
+# swaying, then the arms float down out to the sides with a long breath out.
+REACH_RAISE = _st(a_L=ARM_RAISE, a_R=ARM_RAISE, tpitch=-2.0, head_pitch=-6.0, hz=0.005)
+REACH_V = _st(a_L=ARM_V, a_R=ARM_V, tpitch=-7.0, pitch=-2.0, head_pitch=-20.0, hz=0.035, sh_L=8.0, sh_R=8.0,
+              f_L=(0.20, -0.10, 0.0, 26.0, 8.0, 0.0), f_R=(0.20, -0.10, 0.0, 26.0, 8.0, 0.0))
+REACH_T = _st(a_L=ARM_T, a_R=ARM_T, tpitch=-3.0, head_pitch=-4.0)
+REACH_EXHALE = _st(tpitch=4.0, head_pitch=8.0, sh_L=-5.0, sh_R=-5.0, hz=-0.01)
+STRETCH_OVERHEAD_KEYS = [(0, STRETCH_REST), (8, STRETCH_REST), (26, REACH_RAISE), (46, REACH_V), (96, REACH_V),
+                         (114, REACH_T), (130, REACH_EXHALE), (144, STRETCH_REST), (150, STRETCH_REST)]
+
+
+def _overhead_extra(fr, k):
+    sway = math.sin(2 * math.pi * (fr - 52) / 44.0) * ramp(fr, 50, 60) * (1 - ramp(fr, 88, 98))
+    reach = _pulse(fr, 52, 96, 2)
+    return dict(roll=3.0 * sway, troll=4.0 * sway, head_roll=4.0 * sway, hz=0.006 * reach, tpitch=-2.0 * reach)
+
+
+# -- Side bend: one arm straight up, the other hand on the hip, bending over to the side; then the other side.
+SIDE_FEET = dict(f_L=(0.25, -0.10, 0.0, 0.0, 10.0, 0.0), f_R=(0.25, -0.10, 0.0, 0.0, 10.0, 0.0))
+SIDE_UP = _st(a_L=ARM_HIP, a_R=ARM_UP, tpitch=-2.0, head_pitch=-6.0, **SIDE_FEET)
+SIDE_BEND = _st(SIDE_UP, hx=-0.05, roll=-8.0, troll=-24.0, head_roll=-8.0, head_pitch=-2.0, sh_R=10.0)
+SIDE_REST = _st(**SIDE_FEET)
+STRETCH_SIDE_KEYS = [(0, STRETCH_REST), (10, STRETCH_REST), (24, SIDE_REST), (40, SIDE_UP), (60, SIDE_BEND),
+                     (90, SIDE_BEND), (106, SIDE_UP), (118, SIDE_REST), (134, _st_mirror(SIDE_UP)),
+                     (154, _st_mirror(SIDE_BEND)), (184, _st_mirror(SIDE_BEND)), (200, _st_mirror(SIDE_UP)),
+                     (214, SIDE_REST), (230, STRETCH_REST), (240, STRETCH_REST)]
+
+
+def _side_extra(fr, k):
+    deeper = _pulse(fr, 62, 90, 2) - _pulse(fr, 156, 184, 2)
+    return dict(troll=-5.0 * deeper, roll=-1.5 * deeper)
+
+
+# -- Arm across the chest: the right arm straight across under the chin, the left forearm hooked over it
+# pulling it in, looking away over the right shoulder; then the other arm.
+CROSS_FRONT = (0.25, -0.45, 0.02, -0.3, -1.0, 0.1, -1.0, 0.0, 0.0, 0.6, 0.4, -1.0)
+CROSS_ARM = (-0.33, -0.30, 0.16, -1.0, -0.4, -0.2, 0.0, 1.0, 0.2, 0.0, 0.3, -1.0)
+CROSS_HOOK = (0.0, -0.21, 0.25, -1.0, 0.0, 0.3, 0.0, 1.0, -0.2, 1.0, -0.2, -1.0)
+CROSS_REACH = _st(a_R=CROSS_FRONT, a_L=_mix(ARM_DOWN, CROSS_FRONT, 0.4), head_pitch=4.0)
+CROSS = _st(a_R=CROSS_ARM, a_L=CROSS_HOOK, tyaw=10.0, head_yaw=-24.0, head_pitch=4.0, sh_R=-3.0)
+STRETCH_ARM_CROSS_KEYS = [(0, STRETCH_REST), (10, STRETCH_REST), (24, CROSS_REACH), (36, CROSS), (82, CROSS),
+                          (94, CROSS_REACH), (108, STRETCH_REST), (122, _st_mirror(CROSS_REACH)),
+                          (134, _st_mirror(CROSS)), (180, _st_mirror(CROSS)), (192, _st_mirror(CROSS_REACH)),
+                          (206, STRETCH_REST), (216, STRETCH_REST)]
+
+
+def _cross_extra(fr, k):
+    pull = _pulse(fr, 40, 82, 2) - _pulse(fr, 138, 180, 2)
+    return dict(tyaw=4.0 * pull, head_yaw=-4.0 * pull)
+
+
+# -- Toe touch: an inhale with the hands up in front, then folding forward from the hips (knees soft) to
+# reach for the toes, bobbing a little lower twice, then rolling back up with the arms hanging.
+TOE_FOLD = _st(hy=0.09, hz=-0.05, pitch=52.0, tpitch=28.0, head_pitch=4.0,
+               a_L=(0.17, -0.25, 0.13, 0.0, -0.4, -1.0, -0.2, 0.6, 0.0, 0.4, 0.6, 0.2),
+               a_R=(0.17, -0.25, 0.13, 0.0, -0.4, -1.0, -0.2, 0.6, 0.0, 0.4, 0.6, 0.2),
+               sp_L=(1.0, 0.0, 0.0), sp_R=(1.0, 0.0, 0.0))
+TOE_HANG = (0.24, -0.30, 0.24, 0.0, -0.2, -1.0, -1.0, 0.0, 0.0, 0.3, 0.6, 0.0)  # dangling, armature space
+TOE_ROLL = _st(hy=0.05, hz=-0.03, pitch=30.0, tpitch=26.0, head_pitch=14.0, sh_L=-4.0, sh_R=-4.0,
+               a_L=TOE_HANG, a_R=TOE_HANG, sp_L=(1.0, 0.0, 0.0), sp_R=(1.0, 0.0, 0.0))
+TOE_DOWN = _st(TOE_ROLL, hy=0.07, hz=-0.04, pitch=42.0, tpitch=20.0, head_pitch=6.0,
+               a_L=_st_arm(TOE_HANG, z=0.18), a_R=_st_arm(TOE_HANG, z=0.18))
+STRETCH_TOE_TOUCH_KEYS = [(0, STRETCH_REST), (8, STRETCH_REST), (26, REACH_RAISE), (44, TOE_DOWN), (60, TOE_FOLD),
+                          (104, TOE_FOLD), (120, TOE_ROLL), (140, _st(tpitch=-3.0, head_pitch=-4.0)),
+                          (152, STRETCH_REST), (160, STRETCH_REST)]
+
+
+def _toe_extra(fr, k):
+    bob = _pulse(fr, 66, 102, 2)
+    return dict(pitch=5.0 * bob, tpitch=4.0 * bob, hz=-0.01 * bob)
+
+
+# -- Quad: weight onto the left foot, the right foot pulled up behind by the right hand, the left arm out
+# for balance (wobbling a little); then the other leg.
+QUAD_SHIFT = _st(hx=0.06, roll=3.0, troll=-3.0, f_L=(0.16, -0.10, 0.0, 0.0, 8.0, 0.0),
+                 f_R=(0.20, -0.08, 0.05, 20.0, 8.0, 0.0), a_L=_mix(ARM_DOWN, ARM_T, 0.4))
+QUAD = _st(QUAD_SHIFT, hz=-0.01, tpitch=6.0, troll=-6.0, head_pitch=4.0, sh_R=-8.0,
+           f_R=(0.20, -0.08, 0.05, 20.0, 8.0, 1.0), a_L=(0.75, -0.12, 0.10, 1.0, -0.1, -0.2, 0.0, -0.3, -1.0, 0.0, 0.6, -1.0),
+           a_R=(0.04, 0.07, 0.02, -0.3, 0.2, -1.0, 0.0, -1.0, 0.0, 0.3, 0.4, -1.0), sp_R=(0.0, 1.0, 0.0))
+QUAD_GRAB = _st(QUAD, f_R=(0.20, -0.08, 0.05, 20.0, 8.0, 0.75),
+                a_R=_mix(ARM_DOWN, (0.30, 0.18, -0.36, 0.0, 0.3, -1.0, -1.0, 0.0, 0.0, 0.3, 0.5, -1.0), 1.0))
+STRETCH_QUAD_KEYS = [(0, STRETCH_REST), (10, STRETCH_REST), (24, QUAD_SHIFT), (36, QUAD_GRAB), (46, QUAD), (96, QUAD),
+                     (106, QUAD_GRAB), (116, QUAD_SHIFT), (128, STRETCH_REST), (142, _st_mirror(QUAD_SHIFT)),
+                     (154, _st_mirror(QUAD_GRAB)), (164, _st_mirror(QUAD)), (214, _st_mirror(QUAD)),
+                     (224, _st_mirror(QUAD_GRAB)), (234, _st_mirror(QUAD_SHIFT)), (246, STRETCH_REST),
+                     (256, STRETCH_REST)]
+
+
+def _quad_extra(fr, k):
+    held = ramp(fr, 44, 52) * (1 - ramp(fr, 92, 100)) - ramp(fr, 162, 170) * (1 - ramp(fr, 210, 218))
+    wob = held * (math.sin(2 * math.pi * fr / 37.0) + 0.5 * math.sin(2 * math.pi * fr / 13.0))
+    return dict(roll=1.5 * wob, troll=-2.0 * wob, head_roll=2.0 * wob)
+
+
+# -- Back: hands on the lower back, arching back, then twisting to the left and to the right.
+BACK_HANDS = (0.17, 0.19, 0.02, -0.4, 0.3, -1.0, 0.0, -1.0, 0.0, 1.0, 0.6, 0.0)
+BACK_ON = _st(a_L=BACK_HANDS, a_R=BACK_HANDS, sp_L=(0.0, 0.0, 1.0), sp_R=(0.0, 0.0, 1.0))
+BACK_ARCH = _st(BACK_ON, hy=-0.04, pitch=-6.0, tpitch=-18.0, head_pitch=-22.0, hz=-0.01)
+BACK_TWIST = _st(BACK_ON, yaw=8.0, tyaw=24.0, head_yaw=18.0, tpitch=-3.0)
+STRETCH_BACK_KEYS = [(0, STRETCH_REST), (10, STRETCH_REST), (28, BACK_ON), (48, BACK_ARCH), (76, BACK_ARCH),
+                     (92, BACK_ON), (112, BACK_TWIST), (132, BACK_TWIST), (156, _st_mirror(BACK_TWIST)),
+                     (176, _st_mirror(BACK_TWIST)), (192, BACK_ON), (208, STRETCH_REST), (216, STRETCH_REST)]
+
+
+# -- Neck: head over to the right, then the left, chin down, a slow roll round, then two shoulder rolls.
+NECK_R = _st(head_roll=28.0, head_pitch=4.0, sh_L=-4.0)
+NECK_DOWN = _st(head_pitch=34.0, tpitch=3.0)
+NECK_BACK = _st(head_pitch=-22.0)
+STRETCH_NECK_KEYS = [(0, STRETCH_REST), (10, STRETCH_REST), (28, NECK_R), (52, NECK_R), (74, _st_mirror(NECK_R)),
+                     (98, _st_mirror(NECK_R)), (118, NECK_DOWN), (140, NECK_DOWN), (152, _st(NECK_R, head_pitch=20.0)),
+                     (164, _st(head_roll=16.0, head_pitch=-14.0)), (176, NECK_BACK),
+                     (188, _st(head_roll=-16.0, head_pitch=-14.0)), (200, _st_mirror(_st(NECK_R, head_pitch=20.0))),
+                     (212, _st(head_pitch=16.0)), (224, STRETCH_REST), (276, STRETCH_REST)]
+
+
+def _neck_extra(fr, k):
+    # shoulder rolls: up, back and down, twice
+    u = ramp(fr, 224, 272)
+    if not 0.0 < u < 1.0:
+        return {}
+    a = 2 * math.pi * 2 * u
+    up = 10.0 * (0.5 - 0.5 * math.cos(a))
+    return dict(sh_L=up, sh_R=up, tpitch=-3.0 * math.sin(a))
+
+
 # Poses used only as references for prop offsets
 REF_POSES = {"_ref_grip": _ref_grip, "_ref_book": _ref_book, "_ref_rest": _ref_rest}
 
@@ -3785,5 +4023,12 @@ ANIMATIONS = {
     "Sad_Idle-loop": (sad_idle, 120, True),
     "Hug_Give": (_hug_clip(HUG_GIVE_KEYS, True), HUG_FRAMES, False),
     "Hug_Receive": (_hug_clip(HUG_RECEIVE_KEYS, False), HUG_FRAMES, False),
+    "Stretch_Overhead": (_stretch_clip(STRETCH_OVERHEAD_KEYS, _overhead_extra), 150, False),
+    "Stretch_Side": (_stretch_clip(STRETCH_SIDE_KEYS, _side_extra), 240, False),
+    "Stretch_Arm_Cross": (_stretch_clip(STRETCH_ARM_CROSS_KEYS, _cross_extra), 216, False),
+    "Stretch_Toe_Touch": (_stretch_clip(STRETCH_TOE_TOUCH_KEYS, _toe_extra), 160, False),
+    "Stretch_Quad": (_stretch_clip(STRETCH_QUAD_KEYS, _quad_extra), 256, False),
+    "Stretch_Back": (_stretch_clip(STRETCH_BACK_KEYS), 216, False),
+    "Stretch_Neck": (_stretch_clip(STRETCH_NECK_KEYS, _neck_extra), 276, False),
     **{name: (walk_variant(name), w["cycle"] * w["cycles"], True) for name, w in WALKS.items()},
 }

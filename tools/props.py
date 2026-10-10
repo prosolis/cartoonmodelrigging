@@ -58,6 +58,8 @@ ANIM_PROPS = {
     "Fish_Cast": ["Rod", "Fishing_Line"],
     "Canoe_Paddle-loop": ["Canoe"],
     "Canoe_Rest-loop": ["Canoe"],
+    "Jump_Rope-loop": ["Jump_Rope"],
+    "Float_Tube_Lounge-loop": ["Float_Tube"],
     **{name: ["Skate_L", "Skate_R"] for name in ("Skate_Idle-loop", "Skate_Stride-loop", "Skate_Glide-loop",
                                                  "Skate_Spin-loop", "Skate_Wobble-loop", "Skate_Stop", "Skate_Stumble",
                                                  "Skate_Fall_Forward", "Skate_Fall_Back", "Skate_Fall_Wobble",
@@ -65,7 +67,7 @@ ANIM_PROPS = {
                                                  "Skate_GetUp_Knees", "Skate_GetUp_Clumsy", "Skate_GetUp_Knees_Clumsy")},
 }
 
-ANIMATED_PROPS = ("Bicycle", "Taxi", "Surfboard", "Kite", "Fishing_Line", "Canoe")  # own animation per clip
+ANIMATED_PROPS = ("Bicycle", "Taxi", "Surfboard", "Kite", "Fishing_Line", "Canoe", "Jump_Rope", "Float_Tube")  # own animation per clip
 
 BIKE = {
     "crank": Vector((0, -0.10, 0.27)),
@@ -121,6 +123,11 @@ CANOE = {
     "bottom_z": -0.13, "floor_z": -0.09, "seat_z": -0.07, "gunwale_z": 0.15, "end_z": 0.30,
     "paddle": 2.2,
 }
+# Jump rope: two handles and the rope (JUMP_ROPE["segments"] straight pieces), all keyed per frame.
+# Handle local frame: +Y along the handle, the rope comes out of the +Y end at `tip`.
+JUMP_ROPE = {"segments": 24, "radius": 0.0065, "tip": 0.085, "butt": -0.075}
+# Inflatable ring: torus in the XY plane, centred on the origin (the float frame), half in the water.
+FLOAT_TUBE = {"R": 0.34, "r": 0.13, "z": 0.04}
 # Ice skates: a strap-on blade under each shoe. Local frame: origin on the sole under the shoe centre,
 # toes toward -Y, up +Z; the blade's lowest point is `lift` below the sole (animations put it on the ice).
 SKATE = {"lift": 0.085, "centre_y": -0.075, "front": -0.215, "heel": 0.18, "top": -0.052, "rocker": 0.008}
@@ -666,6 +673,55 @@ def build_canoe(root):
     return {"Canoe_Float": fl, "Canoe_Paddle": paddle}
 
 
+def build_jump_rope(root):
+    j = JUMP_ROPE
+    grip = material("Rope_Handle", (0.95, 0.45, 0.10, 1), 0.5)
+    cap = material("Rope_Cap", (0.15, 0.15, 0.17, 1), 0.4)
+    cord = material("Rope_Cord", (0.20, 0.55, 0.90, 1), 0.6)
+    objs = {}
+    for s in "LR":
+        h = empty(f"Rope_Handle_{s}", root)
+        cylinder_between("Rope_Grip", (0, j["butt"], 0), (0, j["tip"] - 0.02, 0), 0.018, grip, h, 10)
+        cylinder_between("Rope_Cap", (0, j["tip"] - 0.02, 0), (0, j["tip"], 0), 0.013, cap, h, 10)
+        objs[h.name] = h
+    for i in range(j["segments"]):
+        seg = empty(f"Rope_Seg{i:02d}", root)
+        # a little longer than the unit length so the joints between pieces don't show gaps
+        cylinder_between("Rope_Piece", (0, -0.03, 0), (0, 1.03, 0), j["radius"], cord, seg, 6)
+        objs[seg.name] = seg
+    return objs
+
+
+def build_float_tube(root):
+    t = FLOAT_TUBE
+    mats = [material("Tube_Pink", (0.98, 0.42, 0.62, 1), 0.35), material("Tube_White", (0.97, 0.95, 0.92, 1), 0.35)]
+    fl = empty("Tube_Float", root)
+    nu, nv = 48, 16
+    verts = []
+    for i in range(nu):
+        a = 2 * math.pi * i / nu
+        for k in range(nv):
+            b = 2 * math.pi * k / nv
+            rr = t["R"] + t["r"] * math.cos(b)
+            verts.append((rr * math.cos(a), rr * math.sin(a), t["r"] * math.sin(b)))
+    faces = [(i * nv + k, i * nv + (k + 1) % nv, ((i + 1) % nu) * nv + (k + 1) % nv, ((i + 1) % nu) * nv + k)
+             for i in range(nu) for k in range(nv)]
+    me = bpy.data.meshes.new("Tube_Ring")
+    me.from_pydata(verts, [], faces)
+    me.update()
+    o = bpy.data.objects.new("Tube_Ring", me)
+    bpy.context.scene.collection.objects.link(o)
+    for m in mats:
+        o.data.materials.append(m)
+    for poly in o.data.polygons:
+        poly.material_index = (poly.index // nv // 6) % 2  # 8 stripes round the ring
+        poly.use_smooth = True
+    o.parent = fl
+    # the valve
+    cylinder_between("Tube_Valve", (0, t["R"], t["r"] - 0.01), (0, t["R"], t["r"] + 0.025), 0.012, mats[1], fl, 8)
+    return {"Tube_Float": fl}
+
+
 def load_lines():
     if not os.path.exists(LINES_JSON):
         return {}
@@ -699,6 +755,11 @@ def prop_tracks(name):
         return animations.CANOE_TRACKS
     if name == "Kite":
         return animations.KITE_TRACKS
+    if name == "Jump_Rope":
+        return animations.JUMP_ROPE_TRACKS
+    if name == "Float_Tube":
+        return {t: (a, (lambda fn: lambda f, n: {"Tube_Float": fn(f, n)})(fn))
+                for t, (a, fn) in animations.FLOAT_TUBE_TRACKS.items()}
     if name == "Fishing_Line":
         return {"Idle-loop": ("Fish_Idle-loop", fishing_line_state("Idle-loop")),
                 "Cast": ("Fish_Cast", fishing_line_state("Cast"))}
@@ -748,7 +809,7 @@ BUILDERS = {
     "Skate_R": build_skate,
 }
 TRACKED_BUILDERS = {"Surfboard": build_surfboard, "Kite": build_kite, "Fishing_Line": build_fishing_line,
-                    "Canoe": build_canoe}
+                    "Canoe": build_canoe, "Jump_Rope": build_jump_rope, "Float_Tube": build_float_tube}
 
 
 def load_offsets():
@@ -835,7 +896,7 @@ def export_all():
     offsets = load_offsets()
     for name in ["Box", "Umbrella", "Phone", "Bicycle", "Chair", "Cello_Carried", "Cello_Played", "Bow",
                  "Radio_Mic", "TicketBook", "Pen", "Taxi", "Surfboard", "Kite", "Rod", "Fishing_Line", "Canoe",
-                 "Skate_L", "Skate_R"]:
+                 "Skate_L", "Skate_R", "Jump_Rope", "Float_Tube"]:
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o, do_unlink=True)
         root = build(name, animate=name in ANIMATED_PROPS)

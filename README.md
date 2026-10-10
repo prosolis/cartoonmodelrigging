@@ -3,7 +3,7 @@
 `Characters_1_Godot/` is the Characters_1 pack for Godot 4 (308 characters sharing one
 21-bone skeleton). The original zip is kept as `Characters_1_Godot.zip`.
 
-This repo adds **92 new animations** to the pack's shared animation library, plus a few
+This repo adds **99 new animations** to the pack's shared animation library, plus a few
 props that go with them. All 47 original animations are untouched.
 
 ![New animations](Characters_1_Godot/Preview_NewAnimations.png)
@@ -37,6 +37,7 @@ that suffix on import (`Wave_B-loop` shows up as `Wave_B`).
 | Falling on the ice | `Skate_Stumble` (catches a toe and recovers), `Skate_Fall_Forward` (onto hands and knees), `Skate_Fall_Back` (onto the bottom), `Skate_Fall_Wobble` (a beginner's wobble that ends on the bottom), `Skate_Sit_Ice`, `Skate_Kneel_Ice`, `Skate_GetUp`, `Skate_GetUp_Knees`, `Skate_GetUp_Clumsy`, `Skate_GetUp_Knees_Clumsy` | the skates, as above |
 | Dances | `Dance_RunningMan`, `Dance_Robot` (stiff poses that snap on the beat), `Dance_Moonwalk`, `Dance_Disco` (the point up and down across), `Dance_Twist`, `Dance_CabbagePatch`, `Dance_Dab` (once), `Dance_Worm_Down` → `Dance_Worm` → `Dance_Worm_Up` | |
 | Cheering someone up | `Sad_Idle` (slumped, head down, sighing), `Hug_Give` + `Hug_Receive` (a pair: step in, hug, hold at arm's length, step back) | |
+| Stretches | `Stretch_Overhead` (arms up and out in a V, up on the toes), `Stretch_Side` (one arm up, bending to each side), `Stretch_Arm_Cross` (an arm pulled across the chest, each side), `Stretch_Toe_Touch` (folding forward to the toes), `Stretch_Quad` (standing on one leg, foot pulled up behind, each side), `Stretch_Back` (hands on the lower back, arching back, twisting), `Stretch_Neck` (head tilts, chin down, a neck roll, shoulder rolls) | |
 | Zombie | `Zombie_Crawl` (belly on the floor, clawing forward one arm at a time, legs dragging) | |
 | Walks | `Walk_Brisk`, `Walk_Stroll`, `Walk_Tired`, `Walk_Happy`, `Walk_Sightseeing` (looking up at the buildings), `Squeeze_Past_L` / `Squeeze_Past_R` (turned sideways, side-stepping between people in a crowd) | |
 | Extras | `Talk`, `Clap`, `Cheer`, `Point_A`, `Nod_Yes`, `Shake_No`, `Shrug`, `Dance_A`, `Wait_HandsBehind` | |
@@ -207,6 +208,14 @@ root, so you can go straight into the next clip. For example, someone sad gets c
 
 The heads are big, so hair and cheeks press into each other a little during the hug. That's
 most visible when two big-haired characters hug.
+
+**Stretches:** the seven `Stretch_*` clips (5–9 s, not looping) start and end standing relaxed,
+so you can play any of them from an idle and go back to it. The clips with two sides
+(`Stretch_Side`, `Stretch_Arm_Cross`, `Stretch_Quad`, the twist in `Stretch_Back`) do the left and
+right in one clip. The heads are wider than the shoulders and hang down to about shoulder height,
+so the hands never go straight overhead (they reach up and out in a V instead), and the arm in
+`Stretch_Arm_Cross` crosses the chest under the chin. Played one after another, they make a
+warm-up, for example before a jog or after getting off a bus.
 
 **Zombie crawl:** `Zombie_Crawl` (2.4 s loop) sits alongside the pack's own `Zombie_*` clips. It
 crawls in place: to travel, move the character forward at about 0.30 m/s, so the clawing hand

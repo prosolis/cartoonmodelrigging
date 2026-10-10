@@ -3,7 +3,7 @@
 `Characters_1_Godot/` is the Characters_1 pack for Godot 4 (308 characters sharing one
 21-bone skeleton). The original zip is kept as `Characters_1_Godot.zip`.
 
-This repo adds **99 new animations** to the pack's shared animation library, plus a few
+This repo adds **109 new animations** to the pack's shared animation library, plus a few
 props that go with them. All 47 original animations are untouched.
 
 ![New animations](Characters_1_Godot/Preview_NewAnimations.png)
@@ -38,6 +38,9 @@ that suffix on import (`Wave_B-loop` shows up as `Wave_B`).
 | Dances | `Dance_RunningMan`, `Dance_Robot` (stiff poses that snap on the beat), `Dance_Moonwalk`, `Dance_Disco` (the point up and down across), `Dance_Twist`, `Dance_CabbagePatch`, `Dance_Dab` (once), `Dance_Worm_Down` → `Dance_Worm` → `Dance_Worm_Up` | |
 | Cheering someone up | `Sad_Idle` (slumped, head down, sighing), `Hug_Give` + `Hug_Receive` (a pair: step in, hug, hold at arm's length, step back) | |
 | Stretches | `Stretch_Overhead` (arms up and out in a V, up on the toes), `Stretch_Side` (one arm up, bending to each side), `Stretch_Arm_Cross` (an arm pulled across the chest, each side), `Stretch_Toe_Touch` (folding forward to the toes), `Stretch_Quad` (standing on one leg, foot pulled up behind, each side), `Stretch_Back` (hands on the lower back, arching back, twisting), `Stretch_Neck` (head tilts, chin down, a neck roll, shoulder rolls) | |
+| Exercise | `Jump_Rope` (skipping, one hop per turn of the rope), `PushUp_Down` → `PushUp` → `PushUp_Up`, `SitUp_Down` → `SitUp` → `SitUp_Up` (arms crossed on the chest) | `Props/Jump_Rope.glb` at the character root (jump rope) |
+| Float tube | `Float_Tube_Lounge` (lying back in a rubber ring on the water, feet kicking, a hand trailing in the water) | `Props/Float_Tube.glb` at the character root |
+| Window shopping | `Window_Shop_Walk` (strolling past the shops, looking in the windows on the right), `Window_Shop_Gaze` (stopped at a window, just looking at all the wonderful things) | |
 | Zombie | `Zombie_Crawl` (belly on the floor, clawing forward one arm at a time, legs dragging) | |
 | Walks | `Walk_Brisk`, `Walk_Stroll`, `Walk_Tired`, `Walk_Happy`, `Walk_Sightseeing` (looking up at the buildings), `Squeeze_Past_L` / `Squeeze_Past_R` (turned sideways, side-stepping between people in a crowd) | |
 | Extras | `Talk`, `Clap`, `Cheer`, `Point_A`, `Nod_Yes`, `Shake_No`, `Shrug`, `Dance_A`, `Wait_HandsBehind` | |
@@ -55,6 +58,7 @@ character at this speed so the planted foot doesn't slide:
 | `Walk_Tired` | 1.47 s | 0.39 m/s |
 | `Walk_Happy` | 0.87 s (clip has 2 cycles) | 0.96 m/s |
 | `Walk_Sightseeing` | 1.13 s (clip has 4 cycles) | 0.68 m/s |
+| `Window_Shop_Walk` | 1.4 s (clip has 4 cycles) | 0.45 m/s |
 | `Squeeze_Past_L`, `Squeeze_Past_R` | 0.87 s (clip has 2 cycles) | 0.38 m/s |
 
 `Squeeze_Past_L` and `Squeeze_Past_R` are for squeezing between people. The character turns about
@@ -76,7 +80,7 @@ skeleton.add_child(att)                    # the character's Armature/Skeleton3D
 att.add_child(preload("res://Characters_1_Godot/Props/Umbrella.glb").instantiate())
 ```
 
-Root props (`Bicycle`, `Chair`, `Cello_Played`, `Taxi`, `Surfboard`, `Kite`, `Fishing_Line`, `Canoe`) are added as children of the character root
+Root props (`Bicycle`, `Chair`, `Cello_Played`, `Taxi`, `Surfboard`, `Kite`, `Fishing_Line`, `Canoe`, `Jump_Rope`, `Float_Tube`) are added as children of the character root
 with an identity transform; their placement is baked in too.
 
 The bicycle is a child of the character root (not a bone). Its own `AnimationPlayer` has one
@@ -217,6 +221,38 @@ so the hands never go straight overhead (they reach up and out in a V instead), 
 `Stretch_Arm_Cross` crosses the chest under the chin. Played one after another, they make a
 warm-up, for example before a jog or after getting off a bus.
 
+**Jump rope:** `Jump_Rope` (0.67 s loop, one turn of the rope) skips on the balls of the feet,
+hopping as the rope passes under them. `Props/Jump_Rope.glb` (both handles and the rope) is a root
+prop with its own animation `Jump`: add it to the character root with an identity transform and play
+`Jump` together with the clip, like the bicycle. The handles follow the fists and the rope swings
+forward over the head and under the feet. Because the heads are so big, the rope swings in a tall,
+wide loop: it clears every character by at least 3 cm.
+
+**Push-ups and sit-ups:** each comes as a down clip, a loop (one rep) and an up clip that chain
+without blending: `PushUp_Down` → `PushUp` (as many reps as you like) → `PushUp_Up`, and
+`SitUp_Down` → `SitUp` → `SitUp_Up`. The down clips start on the idle pose and the up clips end
+on it, so you can go straight from and back to standing. For push-ups the character squats, puts its
+hands down and hops its feet back into a plank: the hands are about 0.5 m in front of the root
+and the feet about 0.4 m behind it. For sit-ups it sits down, leans back on its hands and lies
+back, with the knees up and the feet flat a little in front of the root, and the arms cross over
+the chest for the reps. The heads are big, so the chest only goes down to about 0.3 m off the
+floor at the bottom of a push-up; very big hair (`Character_3`) brushes the floor there.
+
+**Float tube:** `Float_Tube_Lounge` (10 s loop) is set on the water like the surf and canoe clips:
+the character root is on the water surface. `Props/Float_Tube.glb` is a root prop whose own animation
+`Lounge` bobs and gently turns the ring; play it together with the clip. The character sits in the
+hole, leaning back against the ring, with the knees hooked over the front, the shins in the water and
+the forearms resting on the sides. The feet kick lazily, and once a loop the left hand trails in
+the water. The legs are short, so the ring is small (0.94 m across) and the head rests back over the
+far side of it.
+
+**Window shopping:** `Window_Shop_Walk` is a slow stroll with the head turned to the shop windows on
+the character's right, eyes moving from one thing to the next (see the walk speed table). At a window,
+switch to `Window_Shop_Gaze` (15 s loop) and turn the character to face the glass. In the gaze clip they
+stop and just look: they take in the display from one side to the other, lean in for a closer look,
+go up on their toes with their hands clasped under the chin, and let out a happy sigh. It starts and ends
+standing with the hands behind the back.
+
 **Zombie crawl:** `Zombie_Crawl` (2.4 s loop) sits alongside the pack's own `Zombie_*` clips. It
 crawls in place: to travel, move the character forward at about 0.30 m/s, so the clawing hand
 stays put on the floor while the legs drag. The body lies about 0.3 m in front of the root, with
@@ -296,6 +332,7 @@ python3.11 -m venv .venv && .venv/bin/pip install bpy==4.2.* numpy pillow
 - `tools/props.py`: prop geometry and export
 - `tools/merge_glb.py`: appends animations to the library without touching the originals
 - `tools/check_clearance.py`: umbrella / cello neck vs head clearance check across characters
+- `tools/props.py` `JUMP_ROPE` / `FLOAT_TUBE`: rope thickness and segments, ring size (the clips are built around them)
 - `tools/prop_lines.json`: rod tip and float positions per frame for the fishing line (written by the build)
 - `tools/taxi.py`: fits the PixelClock taxi (scale, door cut-out, windows, cabin)
 - `tools/santa_hat.py`: Santa hat model, per-model fitting (`OVERRIDES` for hand tweaks, skip list)

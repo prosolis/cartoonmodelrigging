@@ -1871,6 +1871,8 @@ WALKS = {
                             arm=36, elbow=34, hip_yaw=6, sway=0.018, head_pitch=-6, bob=7),
     "Walk_Sightseeing-loop": dict(cycle=34, cycles=4, stride=0.46, lift=0.09, width=0.175, bounce=0.012, lean=0,
                                   arm=12, elbow=14, hip_yaw=4, sway=0.015, head_pitch=-3, sightsee=True),
+    "Window_Shop_Walk-loop": dict(cycle=42, cycles=4, stride=0.38, lift=0.07, width=0.175, bounce=0.008, lean=1,
+                                  arm=8, elbow=16, hip_yaw=3, sway=0.014, head_pitch=4, window=True),
 }
 
 
@@ -1953,6 +1955,11 @@ def walk_variant(name):
                 yaw += 42 * look_l - 42 * look_r
                 pitch -= 24 * max(look_l, look_r)
                 p.rotate("Torso", UP, 10 * (look_l - look_r))
+            if w.get("window"):  # looking at the shop windows on the right, from one thing to the next
+                scan = math.sin(2 * math.pi * clip * 3) + 0.4 * math.sin(2 * math.pi * clip * 7)
+                yaw += -52 + 12 * scan
+                pitch += 3 * math.sin(2 * math.pi * clip * 5)
+                p.rotate("Torso", UP, -12 + 2 * scan)
             look(p, yaw=yaw, pitch=pitch, roll=roll)
             breathe(p, clip * w["cycles"] * (2 if slump else 1), 1.0 + slump)
             return p
@@ -3913,6 +3920,284 @@ def _neck_extra(fr, k):
     return dict(sh_L=up, sh_R=up, tpitch=-3.0 * math.sin(a))
 
 
+# ---------------------------------------------------------------------------
+# Jump rope: skipping on the balls of the feet, one hop per turn of the rope.
+# Props/Jump_Rope.glb is a root prop (both handles and the rope) keyed per
+# frame from the same functions the hands use, so the handles stay in the
+# fists. The rope goes over the head from behind and under the feet in front;
+# it swings in a wide loop round the body because the heads are so big.
+from props import JUMP_ROPE  # noqa: E402
+
+JUMP_ROPE_FRAMES = 20          # one turn of the rope (1.5 turns a second)
+JUMP_AIR = (0.30, 0.70)        # turn phase the feet are off the floor (the rope is at the bottom at 0.5)
+JUMP_HEIGHT = 0.08             # feet off the floor at the top of the hop
+JUMP_ROPE_TOP, JUMP_ROPE_REACH = 1.38, 0.74  # rope loop: height above the hands, reach in front / behind
+
+
+def _jump_hop(t):
+    """(foot lift, crouch 0..1) at turn phase t: a hop with the rope under the feet, a soft landing."""
+    a0, a1 = JUMP_AIR
+    t %= 1.0
+    if a0 <= t <= a1:
+        s = (t - a0) / (a1 - a0)
+        return JUMP_HEIGHT * 4 * s * (1 - s), 0.0
+    u = ((t - a1) % 1.0) / (1 - (a1 - a0))  # on the floor: land, sink, push off
+    return 0.0, math.sin(math.pi * u) ** 2
+
+
+def _jump_body_dz(t):
+    lift, crouch = _jump_hop(t)
+    return lift - 0.035 * crouch
+
+
+def jump_rope_handle(side, t):
+    """Handle matrix (+Y along the handle toward the rope end) at turn phase t: the fists make small
+    circles a little ahead of the rope, out at hip height."""
+    sx = SIDE[side]
+    a = 2 * math.pi * t + 0.7
+    palm = V(0.42 * sx, -0.10, 0.62 + 0.8 * _jump_body_dz(t)) + 0.035 * V(0, -math.sin(a), math.cos(a))
+    y = V(0.30 * sx, -0.25 + 0.10 * math.sin(a), 1.0).normalized()
+    x = V(sx, 0, 0)
+    x = (x - y * x.dot(y)).normalized()
+    m = Matrix((x, y, x.cross(y))).transposed().to_4x4()
+    m.translation = palm
+    return m
+
+
+def jump_rope_points(t):
+    """Points along the rope from the right handle's tip to the left one's."""
+    tips = {s: jump_rope_handle(s, t) @ V(0, JUMP_ROPE["tip"], 0) for s in "LR"}
+    th = 2 * math.pi * t  # 0: over the head, 0.25: in front, 0.5: under the feet, 0.75: behind
+    c = math.cos(th)
+    mid = (tips["L"] + tips["R"]) / 2
+    reach_z = JUMP_ROPE_TOP if c > 0 else mid.z - JUMP_ROPE["radius"] - 0.006
+    apex = V(0, -math.sin(th) * JUMP_ROPE_REACH, c * reach_z)
+    bulge = 0.10 + 0.22 * max(0.0, c)  # wider over the head
+    flat = 0.55 - 0.35 * max(0.0, -c)  # flatter under the feet
+    n = JUMP_ROPE["segments"]
+    pts = []
+    for i in range(n + 1):
+        u = i / n
+        k = math.sin(math.pi * u)
+        out = -math.cos(math.pi * u) * bulge * math.sqrt(k)
+        pts.append(tips["R"].lerp(tips["L"], u) + V(out, 0, 0) + apex * k ** flat)
+    return pts
+
+
+def jump_rope_state(f, frames):
+    t = f / JUMP_ROPE_FRAMES
+    out = {f"Rope_Handle_{s}": jump_rope_handle(s, t) for s in "LR"}
+    pts = jump_rope_points(t)
+    for i, (a, b) in enumerate(zip(pts, pts[1:])):
+        out[f"Rope_Seg{i:02d}"] = _line_matrix(a, b)
+    return out
+
+
+JUMP_ROPE_TRACKS = {"Jump-loop": ("Jump_Rope-loop", jump_rope_state)}
+
+
+def jump_rope(ctx, frames):
+    def pose(fr):
+        t = fr / JUMP_ROPE_FRAMES
+        lift, crouch = _jump_hop(t)
+        air = 1.0 if lift > 0 else 0.0
+        p = ctx.stand()
+        hips_to(ctx, p, V(0, 0.01, ctx.hips_z - 0.02 + _jump_body_dz(t)), pitch=3.0 + 4.0 * crouch)
+        p.rotate("Torso", LEFT, 2.0 - 3.0 * crouch)
+        for s in "LR":
+            heel = 22.0 + 18.0 * math.sin(math.pi * clamp(lift / JUMP_HEIGHT)) * air
+            _shoe(ctx, p, s, 0.12, -0.10, lift, toe_out=5.0, heel=heel, toe=heel * 0.5 * air,
+                  knee=(0.2, -1.0, 0.0))
+        for s in "LR":
+            sx = SIDE[s]
+            h = jump_rope_handle(s, t)
+            hy = h.to_3x3().col[1]
+            palm = h.translation
+            fingers = hy.cross(V(-sx, 0, 0))
+            if fingers.y > 0:
+                fingers = -fingers
+            arm_to(p, s, palm, fingers, V(-sx, 0, 0), V(0.6 * sx, 0.8, -0.2))
+        look(p, pitch=-4.0 + 4.0 * crouch, roll=1.5 * math.sin(2 * math.pi * fr / frames))
+        return p
+    return pose
+
+
+# ---------------------------------------------------------------------------
+# Float tube: lounging in an inflatable ring on the water, bottom in the hole,
+# back against the rear of the ring, knees over the front, arms draped over
+# the sides. The root is on the water surface (like the surf and canoe clips);
+# Props/Float_Tube.glb is a root prop that bobs and turns a little, and the
+# body moves with it. Once a loop the left hand trails in the water.
+from props import FLOAT_TUBE  # noqa: E402
+
+FLOAT_TUBE_FRAMES = 300
+# The legs are short, so the hips sit at the front of the hole (the thighs just reach over the
+# front of the ring) and the body leans far back so the shoulders rest on the back of it.
+TUBE_HIPS = V(0, -0.25, FLOAT_TUBE["z"] + 0.04)  # hips (float space)
+TUBE_RECLINE = 68.0                              # degrees the hips lean back
+
+
+def float_tube_matrix(f, frames):
+    ph = f / frames
+    return _float_matrix(z=0.012 * wave(ph * 3), pitch=1.8 * wave(ph * 3, 0.2), roll=2.5 * wave(ph * 2),
+                         yaw=7.0 * wave(ph, 0.1))
+
+
+FLOAT_TUBE_TRACKS = {"Lounge-loop": ("Float_Tube_Lounge-loop", float_tube_matrix)}
+
+
+def float_tube_lounge(ctx, frames):
+    t = FLOAT_TUBE
+    top = t["z"] + t["r"]
+
+    def pose(fr):
+        ph = fr / frames
+        p = ctx.stand()
+        hips_to(ctx, p, TUBE_HIPS, pitch=-TUBE_RECLINE)
+        p.rotate("Torso", LEFT, -8.0)
+        breathe(p, ph * 5, 1.4)
+        for s in "LR":  # knees over the front of the ring, lazy kicks in the water
+            sx = SIDE[s]
+            kick = math.sin(2 * math.pi * (ph * 6 + (0.0 if s == "L" else 0.5))) * ramp(ph, 0.0, 0.05)
+            kick *= 0.6 + 0.4 * wave(ph, 0.3)
+            ankle = V(0.17 * sx, -t["R"] - 0.16 - 0.05 * kick, top - 0.26 + 0.06 * kick)
+            p.leg_ik(s, ankle, V(0.15 * sx, -0.4, 1.0))
+            p.foot_flat(s, rot(UP, 12 * sx) @ FWD, pitch=40 + 15 * kick)
+        dip = math.sin(math.pi * ramp(ph, 0.45, 0.80))  # the left hand trails in the water
+        swirl = 2 * math.pi * ramp(ph, 0.52, 0.74) * 2
+        for s in "LR":  # forearms resting on top of the ring, hands over the side
+            sx = SIDE[s]
+            palm = V(0.47 * sx, -0.06, top + 0.03)
+            fingers, palm_n = V(0.5 * sx, -0.6, -0.6), V(0.2 * sx, 0, -1)
+            if s == "L" and dip > 0:
+                palm = palm.lerp(V(0.66, -0.10 + 0.05 * math.sin(swirl), -0.05 + 0.03 * math.cos(swirl)), dip)
+                fingers = fingers.lerp(V(0.3, -0.5, -1.0), dip)
+            arm_to(p, s, palm, fingers, palm_n, V(0.8 * sx, 0.6, 0.0))
+        look(p, yaw=-10 * wave(ph, 0.15) + 30 * dip, pitch=38 - 6 * wave(ph * 2) + 12 * dip, roll=-6 + 4 * wave(ph))
+        _on_float(p, float_tube_matrix(fr, frames))
+        return p
+    return pose
+
+
+# ---------------------------------------------------------------------------
+# Window shopping. Window_Shop_Walk is a walk variant (see WALKS): a slow stroll
+# with the head turned to the shop windows on the right. Window_Shop_Gaze is the
+# stop in front of one window (straight ahead): they just stand and look at all
+# the wonderful things, eyes wandering over the display, leaning in for a
+# closer look, hands clasped in delight, a happy sigh. It's built on the
+# stretch parameter set (STRETCH_REST).
+
+HANDS_BEHIND = (0.07, 0.29, -0.08, -1.0, 0.0, -0.4, -1.0, 0.6, 0.0, 1.0, 0.4, -0.3)
+HANDS_CLASPED = (0.03, -0.31, 0.29, -1.0, -0.2, 0.7, -1.0, 0.0, 0.0, 0.8, 0.0, -1.0)  # under the chin
+GAZE = _st(a_L=HANDS_BEHIND, a_R=HANDS_BEHIND, head_pitch=6.0, tpitch=-1.0)
+GAZE_LEAN = _st(GAZE, hy=-0.04, pitch=6.0, tpitch=15.0, head_pitch=10.0, hz=-0.005,
+                f_L=(0.20, -0.10, 0.0, 14.0, 8.0, 0.0), f_R=(0.20, -0.10, 0.0, 14.0, 8.0, 0.0))
+GAZE_CLASP = _st(GAZE_LEAN, a_L=HANDS_CLASPED, a_R=_st_arm(HANDS_CLASPED, x=0.01, z=0.28), sh_L=8.0, sh_R=8.0,
+                 tpitch=8.0, head_pitch=0.0, hz=0.02, f_L=(0.20, -0.10, 0.0, 22.0, 8.0, 0.0),
+                 f_R=(0.20, -0.10, 0.0, 22.0, 8.0, 0.0))  # up on the toes
+GAZE_SIGH = _st(GAZE, a_L=_st_arm(HANDS_CLASPED, z=0.20), a_R=_st_arm(HANDS_CLASPED, x=0.01, z=0.19),
+                tpitch=-4.0, head_pitch=-2.0, head_roll=10.0, sh_L=-3.0, sh_R=-3.0)
+WINDOW_SHOP_GAZE_KEYS = [
+    (0, _st(GAZE, head_yaw=24.0)), (50, _st(GAZE, head_yaw=30.0, head_pitch=10.0)),     # the left of the display
+    (80, _st(GAZE, head_yaw=6.0, head_pitch=2.0)), (110, _st(GAZE, head_yaw=2.0, head_pitch=-4.0)),  # up top
+    (140, _st(GAZE_LEAN, head_yaw=-6.0)), (175, _st(GAZE_LEAN, head_yaw=-14.0, head_pitch=12.0)),  # closer look
+    (195, _st(GAZE_CLASP, head_yaw=-10.0)), (235, _st(GAZE_CLASP, head_yaw=-16.0, head_roll=-6.0)),  # oh!
+    (265, _st(GAZE_SIGH, head_yaw=-4.0)), (295, _st(GAZE_SIGH, head_yaw=4.0)),            # a happy sigh
+    (335, _st(GAZE, head_yaw=-26.0, head_pitch=8.0)), (380, _st(GAZE, head_yaw=-30.0, head_pitch=4.0)),
+    (420, _st(GAZE, head_yaw=-8.0)), (450, _st(GAZE, head_yaw=24.0)),
+]
+
+
+def _gaze_extra(fr, k):
+    # the eyes (head) dart from thing to thing; weight drifts from foot to foot; the shoulders lift in the sigh
+    dart = 2.5 * math.sin(2 * math.pi * fr / 23.0) * math.sin(2 * math.pi * fr / 61.0)
+    drift = math.sin(2 * math.pi * fr / 150.0)
+    sigh = _pulse(fr, 248, 292, 1)
+    return dict(head_yaw=dart, head_pitch=0.8 * dart, hx=0.012 * drift, roll=0.8 * drift,
+                sh_L=5.0 * sigh, sh_R=5.0 * sigh, tpitch=-2.0 * sigh)
+
+
+# ---------------------------------------------------------------------------
+# Push-ups and sit-ups, on the floor body parameter set (_floor_body). Each has
+# a loop (one rep) and clips down from and back up to the idle pose:
+# PushUp_Down -> PushUp (reps) -> PushUp_Up, SitUp_Down -> SitUp -> SitUp_Up.
+# The plank is laid out so the hands are in front of where the feet stood and
+# the feet behind; sitting up, the bottom is a little behind the root.
+
+_PLANK_FEET = (0.12, 0.40, 0.0, 0.0, 75.0, 0.0, 0.1, 0.0, -1.0)
+_PLANK_HANDS = dict(hands=(1.0, 1.0), hL=(0.31, -0.50, 0.045), hR=(0.31, -0.50, 0.045),
+                    fL=(0.15, -1.0, 0.0), fR=(0.15, -1.0, 0.0), eL=(0.6, 0.7, 0.3), eR=(0.6, 0.7, 0.3),
+                    aL=(60.0, 10.0, 10.0), aR=(60.0, 10.0, 10.0))
+# body straight from the ankles (y 0.35, z 0.14 on the toes) through the hips to the shoulders:
+# top: shoulders 0.60 above the floor, bottom: 0.38 (any lower and the big head reaches the floor)
+PUSH_TOP = dict(hx=0.0, hy=0.067, hz=0.299, pitch=61.0, torso=0.0, head_pitch=-14.0,
+                L=_PLANK_FEET, R=_PLANK_FEET, **_PLANK_HANDS)
+PUSH_BOTTOM = dict(PUSH_TOP, hy=0.027, hz=0.219, pitch=75.5, head_pitch=-34.0,
+                   L=(0.12, 0.40, 0.0, 0.0, 80.0, 0.0, 0.1, 0.0, -1.0), R=(0.12, 0.40, 0.0, 0.0, 80.0, 0.0, 0.1, 0.0, -1.0),
+                   eL=(0.9, 0.5, 0.4), eR=(0.9, 0.5, 0.4))
+PUSH_STAND = dict(PUSH_TOP, hy=0.0, hz=0.41, pitch=0.0, head_pitch=0.0, hands=(0.0, 0.0),
+                  aL=(0.0, 8.0, 15.0), aR=(0.0, 8.0, 15.0), **_STAND_FEET)
+PUSH_SQUAT = dict(PUSH_TOP, hy=0.03, hz=0.25, pitch=52.0, torso=8.0, head_pitch=-20.0,
+                  L=(0.19, -0.06, 0.0, 8.0, 30.0, 0.0, 0.3, -1.0, 0.0), R=(0.19, -0.06, 0.0, 8.0, 30.0, 0.0, 0.3, -1.0, 0.0))
+PUSH_REACH = dict(PUSH_SQUAT, hz=0.30, pitch=40.0, hands=(0.5, 0.5), head_pitch=-10.0)
+PUSH_HOP = dict(PUSH_TOP, hy=0.10, hz=0.33, pitch=58.0, head_pitch=-16.0,
+                L=(0.14, 0.17, 0.10, 4.0, 60.0, 20.0, 0.2, -0.5, -1.0), R=(0.14, 0.17, 0.10, 4.0, 60.0, 20.0, 0.2, -0.5, -1.0))
+PUSHUP_DOWN_KEYS = [(0, PUSH_STAND), (10, PUSH_REACH), (18, PUSH_SQUAT), (25, PUSH_HOP), (33, PUSH_TOP),
+                    (42, PUSH_TOP)]
+PUSHUP_UP_KEYS = [(0, PUSH_TOP), (8, PUSH_TOP), (16, PUSH_HOP), (23, PUSH_SQUAT), (32, PUSH_REACH),
+                  (44, PUSH_STAND), (48, PUSH_STAND)]
+PUSHUP_KEYS = [(0, PUSH_TOP), (4, PUSH_TOP), (20, PUSH_BOTTOM), (23, PUSH_BOTTOM), (34, PUSH_TOP), (40, PUSH_TOP)]
+
+# lying on the back, knees up, feet flat; the arms cross over the chest
+_SIT_FEET = (0.15, 0.05, 0.0, 6.0, 0.0, 0.0, 0.2, -0.3, 1.0)
+SIT_LYING = dict(hx=0.0, hy=0.40, hz=0.13, pitch=-78.0, torso=0.0, head_pitch=24.0,
+                 L=_SIT_FEET, R=_SIT_FEET, aL=(0.0, 8.0, 15.0), aR=(0.0, 8.0, 15.0), hands=(0.0, 0.0),
+                 hL=(0.25, 0.62, 0.045), hR=(0.25, 0.62, 0.045), fL=(0.4, 1.0, 0.0), fR=(0.4, 1.0, 0.0),
+                 eL=(0.5, -1.0, 0.5), eR=(0.5, -1.0, 0.5), cross=1.0)
+SIT_UP = dict(SIT_LYING, hy=0.38, hz=0.15, pitch=-28.0, torso=40.0, head_pitch=10.0)
+SIT_PROP = dict(SIT_UP, pitch=-24.0, torso=6.0, head_pitch=-4.0, hands=(1.0, 1.0), cross=0.0,  # leaning back on the hands
+                aL=(-40.0, 15.0, 10.0), aR=(-40.0, 15.0, 10.0))
+SIT_SQUAT = dict(PUSH_SQUAT, hands=(0.0, 0.0), hL=SIT_LYING["hL"], hR=SIT_LYING["hR"], fL=SIT_LYING["fL"],
+                 fR=SIT_LYING["fR"], eL=SIT_LYING["eL"], eR=SIT_LYING["eR"], aL=(30.0, 12.0, 30.0),
+                 aR=(30.0, 12.0, 30.0), cross=0.0, hy=0.02, pitch=30.0, torso=10.0,
+                 L=(0.19, -0.10, 0.0, 8.0, 10.0, 0.0, 0.3, -1.0, 0.0), R=(0.19, -0.10, 0.0, 8.0, 10.0, 0.0, 0.3, -1.0, 0.0))
+SIT_LOWER = dict(SIT_PROP, hy=0.20, hz=0.20, pitch=-5.0, torso=18.0, hands=(0.6, 0.6),
+                 L=(0.17, -0.06, 0.0, 6.0, 0.0, 0.0, 0.25, -0.6, 0.6), R=(0.17, -0.06, 0.0, 6.0, 0.0, 0.0, 0.25, -0.6, 0.6))
+SIT_STAND = dict(SIT_SQUAT, hy=0.0, hz=0.41, pitch=0.0, torso=0.0, head_pitch=0.0, aL=(0.0, 8.0, 15.0),
+                 aR=(0.0, 8.0, 15.0), **_STAND_FEET)
+SITUP_DOWN_KEYS = [(0, SIT_STAND), (14, SIT_SQUAT), (26, SIT_LOWER), (36, SIT_PROP), (50, SIT_LYING), (56, SIT_LYING)]
+SITUP_UP_KEYS = [(0, SIT_LYING), (6, SIT_LYING), (20, SIT_PROP), (32, SIT_LOWER), (44, SIT_SQUAT), (58, SIT_STAND),
+                 (62, SIT_STAND)]
+SITUP_KEYS = [(0, SIT_LYING), (6, SIT_LYING), (22, SIT_UP), (27, SIT_UP), (43, SIT_LYING), (48, SIT_LYING)]
+
+
+def _cross_arms(p, w):
+    """Blend the arms toward crossed over the chest (palms on the opposite shoulders)."""
+    if w <= 0:
+        return
+    crossed = p.copy()
+    f, d = body_frame(crossed)
+    for s, z in (("L", 0.27), ("R", 0.21)):
+        sx = SIDE[s]
+        arm_to(crossed, s, f(-0.11 * sx, -0.24, z), d(V(-sx, 0.1, 0.35)), d(V(0, 1, 0)), d(V(sx, -0.6, -0.8)))
+    for s in "LR":
+        blend_bones(p, crossed, w, ARM[s])
+
+
+def _floor_clip(keys, start=False, end=False, loop=False):
+    """Keyed _floor_body clip with optional crossed arms; eases from / into the exact idle pose."""
+    def build(ctx, frames):
+        def pose(fr):
+            k = _keyed_mix(fr, keys)
+            p = ctx.stand()
+            _floor_body(ctx, p, k)
+            _cross_arms(p, k.get("cross", 0.0))
+            w = 1 - ramp(fr, 0, 6) if start else ramp(fr, frames - 8, frames) if end else 0.0
+            return blend(p, ctx.stand(), smooth(w)) if w > 0 else p
+        return pose
+    return build
+
+
 # Poses used only as references for prop offsets
 REF_POSES = {"_ref_grip": _ref_grip, "_ref_book": _ref_book, "_ref_rest": _ref_rest}
 
@@ -4030,5 +4315,14 @@ ANIMATIONS = {
     "Stretch_Quad": (_stretch_clip(STRETCH_QUAD_KEYS, _quad_extra), 256, False),
     "Stretch_Back": (_stretch_clip(STRETCH_BACK_KEYS), 216, False),
     "Stretch_Neck": (_stretch_clip(STRETCH_NECK_KEYS, _neck_extra), 276, False),
+    "Jump_Rope-loop": (jump_rope, JUMP_ROPE_FRAMES, True),
+    "Float_Tube_Lounge-loop": (float_tube_lounge, FLOAT_TUBE_FRAMES, True),
+    "Window_Shop_Gaze-loop": (_stretch_clip(WINDOW_SHOP_GAZE_KEYS, _gaze_extra), 450, True),
+    "PushUp_Down": (_floor_clip(PUSHUP_DOWN_KEYS, start=True), 42, False),
+    "PushUp-loop": (_floor_clip(PUSHUP_KEYS), 40, True),
+    "PushUp_Up": (_floor_clip(PUSHUP_UP_KEYS, end=True), 48, False),
+    "SitUp_Down": (_floor_clip(SITUP_DOWN_KEYS, start=True), 56, False),
+    "SitUp-loop": (_floor_clip(SITUP_KEYS), 48, True),
+    "SitUp_Up": (_floor_clip(SITUP_UP_KEYS, end=True), 62, False),
     **{name: (walk_variant(name), w["cycle"] * w["cycles"], True) for name, w in WALKS.items()},
 }

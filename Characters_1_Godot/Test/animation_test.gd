@@ -5,7 +5,8 @@ extends Node3D
 
 const CROWD_SIZE := 12
 const Hats := preload("../Props/santa_hat.gd")
-# Character animation -> animation of its root prop (Bicycle, Taxi, Surfboard, Kite, Fishing_Line, Canoe) to play with it
+# Character animation -> animation of its root prop (Bicycle, Taxi, Surfboard, Kite, Fishing_Line, Canoe,
+# Jump_Rope, Float_Tube) to play with it
 const PROP_ANIMS := {
 	"Cycling": "Pedal",
 	"Cycling_Coast": "Coast",
@@ -28,6 +29,9 @@ const PROP_ANIMS := {
 	"Fish_Cast": "Cast",
 	"Canoe_Paddle": "Paddle",
 	"Canoe_Rest": "Rest",
+	# jump rope, float tube
+	"Jump_Rope": "Jump",
+	"Float_Tube_Lounge": "Lounge",
 }
 
 # Props for some of the added animations: animation name prefix -> list of [prop scene, bone].
@@ -51,6 +55,8 @@ const PROPS := {
 	"Fish_": [["Props/Rod.glb", "IteamSlot.R"], ["Props/Fishing_Line.glb", ""]],
 	"Canoe_": [["Props/Canoe.glb", ""]],
 	"Skate_": [["Props/Skate_L.glb", "Foot.L"], ["Props/Skate_R.glb", "Foot.R"]],
+	"Jump_Rope": [["Props/Jump_Rope.glb", ""]],
+	"Float_Tube": [["Props/Float_Tube.glb", ""]],
 }
 
 var pack_dir := ""
